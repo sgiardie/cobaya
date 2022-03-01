@@ -118,7 +118,7 @@ best adapts to your needs:
 
 * [**Recommended for staying up-to-date**]
   To install CAMB locally and keep it up-to-date, clone the
-  `CAMB repository in GitHub <https://github.com/cmbant/CAMB>`_
+  `CAMB repository in Github <https://github.com/cmbant/CAMB>`_
   in some folder of your choice, say ``/path/to/theories/CAMB``:
 
   .. code:: bash
@@ -138,7 +138,7 @@ best adapts to your needs:
      $ python -m pip install -e /path/to/CAMB
 
 * [**Recommended for modifying CAMB**]
-  First, `fork the CAMB repository in GitHub <https://github.com/cmbant/CAMB>`_
+  First, `fork the CAMB repository in Github <https://github.com/cmbant/CAMB>`_
   (follow `these instructions <https://help.github.com/articles/fork-a-repo/>`_) and then
   follow the same steps as above, substituting the second one with:
 
@@ -147,7 +147,8 @@ best adapts to your needs:
       $ git clone --recursive https://[YourGithubUser]@github.com/[YourGithubUser]/CAMB.git
 
 * To use your own version, assuming it's placed under ``/path/to/theories/CAMB``,
-  just make sure it is compiled.
+  just make sure it is compiled (and that the version on top of which you based your
+  modifications is old enough to have the Python interface implemented.
 
 In the cases above, you **must** specify the path to your CAMB installation in
 the input block for CAMB (otherwise a system-wide CAMB may be used instead):
@@ -160,7 +161,7 @@ the input block for CAMB (otherwise a system-wide CAMB may be used instead):
 
 .. note::
 
-   In any of these methods, if you intend to switch between different versions or
+   In any of these methods, if you intent to switch between different versions or
    modifications of CAMB you should not install CAMB as python package using
    ``python setup.py install``, as the official instructions suggest.
 """
@@ -179,9 +180,9 @@ from cobaya.theories.cosmo import BoltzmannBase
 from cobaya.log import LoggedError, get_logger
 from cobaya.install import download_github_release, check_gcc_version, NotInstalledError
 from cobaya.tools import getfullargspec, get_class_methods, get_properties, load_module, \
-    VersionCheckError, check_component_version, str_to_list, Pool1D, Pool2D, PoolND
+    VersionCheckError, str_to_list
 from cobaya.theory import HelperTheory
-from cobaya.typing import InfoDict, empty_dict
+from cobaya.typing import InfoDict
 
 
 # Result collector
@@ -189,8 +190,6 @@ class Collector(NamedTuple):
     method: Callable
     args: list = []
     kwargs: dict = {}
-    z_pool: Optional[PoolND] = None
-    post: Optional[Callable] = None
 
 
 class CAMBOutputs(NamedTuple):
@@ -203,7 +202,6 @@ class CAMB(BoltzmannBase):
     r"""
     CAMB cosmological Boltzmann code \cite{Lewis:1999bs,Howlett:2012mh}.
     """
-
     # Name of the Class repo/folder and version to download
     _camb_repo_name = "cmbant/CAMB"
     _camb_repo_version = os.environ.get("CAMB_REPO_VERSION", "master")
@@ -285,7 +283,6 @@ class CAMB(BoltzmannBase):
         if not self.external_primordial_pk \
                 and set(self.input_params).intersection({'r', 'At'}):
             self.extra_attrs["WantTensors"] = True
-            self.extra_attrs["Accuracy.AccurateBB"] = True
 
     def get_can_support_params(self):
         return self.power_params + self.nonlin_params
@@ -330,7 +327,7 @@ class CAMB(BoltzmannBase):
                         "spectra": list(set(
                             (self.collectors[k].kwargs.get("spectra", [])
                              if k in self.collectors else []) +
-                            ["total"] + (["lens_potential"] if needs_lensing else []))),
+                            ["total"]+["unlensed_scalar"]+["unlensed_total"]+["lensed_scalar"]+["tensor"]+(["lens_potential"] if needs_lensing else []))),
                         "raw_cl": False})
                 if "pp" in cls and self.extra_args.get(
                         "lens_potential_accuracy") is None:
@@ -345,31 +342,24 @@ class CAMB(BoltzmannBase):
                     method=CAMBdata.get_cmb_power_spectra,
                     kwargs={"spectra": ["unlensed_total"], "raw_cl": False})
             elif k == "Hubble":
-                self.set_collector_with_z_pool(k, v["z"], CAMBdata.h_of_z)
-            elif k in ["Omega_b", "Omega_cdm", "Omega_nu_massive"]:
-                varnames = {
-                    "Omega_b": "baryon", "Omega_cdm": "cdm", "Omega_nu_massive": "nu"}
-                self.set_collector_with_z_pool(
-                    k, v["z"], CAMBdata.get_Omega, kwargs={"var": varnames[k]})
+                self.collectors[k] = Collector(
+                    method=CAMBdata.h_of_z,
+                    kwargs={"z": self._combine_z(k, v)})
             elif k in ("angular_diameter_distance", "comoving_radial_distance"):
-                self.set_collector_with_z_pool(k, v["z"], getattr(CAMBdata, k))
-            elif k == "angular_diameter_distance_2":
-                check_component_version(self.camb, '1.3.5')
-                self.set_collector_with_z_pool(
-                    k, v["z_pairs"], CAMBdata.angular_diameter_distance2, d=2)
+                self.collectors[k] = Collector(
+                    method=getattr(CAMBdata, k),
+                    kwargs={"z": self._combine_z(k, v)})
             elif k == "sigma8_z":
                 self.add_to_redshifts(v["z"])
                 self.collectors[k] = Collector(
                     method=CAMBdata.get_sigma8,
-                    kwargs={},
-                    post=(lambda *x: x[::-1]))  # returned in inverse order
+                    kwargs={})
                 self.needs_perts = True
             elif k == "fsigma8":
                 self.add_to_redshifts(v["z"])
                 self.collectors[k] = Collector(
                     method=CAMBdata.get_fsigma8,
-                    kwargs={},
-                    post=(lambda *x: x[::-1]))  # returned in inverse order
+                    kwargs={})
                 self.needs_perts = True
             elif isinstance(k, tuple) and k[0] == "sigma_R":
                 kwargs = v.copy()
@@ -395,9 +385,8 @@ class CAMB(BoltzmannBase):
                                                             "in computed P_K array %s", z)
                         _indices = np.array(z_indices, dtype=np.int32)
                         self._sigmaR_z_indices[var_pair] = _indices
-                    R, z, sigma = results.get_sigmaR(hubble_units=False, return_R_z=True,
-                                                     z_indices=_indices, **tmp)
-                    return z, R, sigma
+                    return results.get_sigmaR(hubble_units=False, return_R_z=True,
+                                              z_indices=_indices, **tmp)
 
                 kwargs.update(dict(zip(["var1", "var2"], var_pair)))
                 self.collectors[k] = Collector(method=get_sigmaR, kwargs=kwargs)
@@ -480,33 +469,16 @@ class CAMB(BoltzmannBase):
         return must_provide
 
     def add_to_redshifts(self, z):
-        """
-        Adds redshifts to the list of them for which CAMB computes perturbations.
-        """
-        if not hasattr(self, "z_pool_for_perturbations"):
-            self.z_pool_for_perturbations = Pool1D(z)
-        else:
-            self.z_pool_for_perturbations.update(z)
-        self.extra_args["redshifts"] = np.flip(self.z_pool_for_perturbations.values)
+        self.extra_args["redshifts"] = np.sort(np.unique(np.concatenate(
+            (np.atleast_1d(z), self.extra_args.get("redshifts", [])))))[::-1]
 
-    def set_collector_with_z_pool(self, k, zs, method, args=(), kwargs=empty_dict, d=1):
-        """
-        Creates a collector for a z-dependent quantity, keeping track of the pool of z's.
-        """
-        if k in self.collectors:
-            z_pool = self.collectors[k].z_pool
-            z_pool.update(zs)
+    def _combine_z(self, k, v):
+        c = self.collectors.get(k, None)
+        if c:
+            return np.sort(
+                np.unique(np.concatenate((c.kwargs['z'], np.atleast_1d(v['z'])))))
         else:
-            Pool = {1: Pool1D, 2: Pool2D}[d]
-            z_pool = Pool(zs)
-        if d == 1:
-            kwargs_with_z = {"z": z_pool.values}
-        else:
-            kwargs_with_z = {"z1": np.array(z_pool.values[:, 0]),
-                             "z2": np.array(z_pool.values[:, 1])}
-        kwargs_with_z.update(kwargs)
-        self.collectors[k] = Collector(
-            method=method, z_pool=z_pool, kwargs=kwargs_with_z, args=args)
+            return np.sort(np.atleast_1d(v['z']))
 
     def calculate(self, state, want_derived=True, **params_values_dict):
         try:
@@ -549,8 +521,6 @@ class CAMB(BoltzmannBase):
                 if collector:
                     state[product] = \
                         collector.method(results, *collector.args, **collector.kwargs)
-                    if collector.post:
-                        state[product] = collector.post(*state[product])
                 else:
                     state[product] = results
         except self.camb.baseconfig.CAMBError as e:
@@ -659,11 +629,20 @@ class CAMB(BoltzmannBase):
         return self._get_Cl(ell_factor=ell_factor, units=units, lensed=False)
 
     def _get_z_dependent(self, quantity, z):
-        # Partially reimplemented because of sigma8_z, etc, use different pool
-        pool = None
         if quantity in ["sigma8_z", "fsigma8"]:
-            pool = self.z_pool_for_perturbations
-        return super()._get_z_dependent(quantity, z, pool=pool)
+            computed_redshifts = self.extra_args["redshifts"]
+            i_kwarg_z = np.concatenate(
+                [np.where(computed_redshifts == zi)[0] for zi in np.atleast_1d(z)])
+        else:
+            computed_redshifts = self.collectors[quantity].kwargs["z"]
+            i_kwarg_z = np.searchsorted(computed_redshifts, np.atleast_1d(z))
+        return np.array(self.current_state[quantity], copy=True)[i_kwarg_z]
+
+    def get_sigma8_z(self, z):
+        return self._get_z_dependent("sigma8_z", z)
+
+    def get_fsigma8(self, z):
+        return self._get_z_dependent("fsigma8", z)
 
     def get_source_Cl(self):
         # get C_l^XX from the cosmological code
@@ -737,24 +716,16 @@ class CAMB(BoltzmannBase):
                     for fixed_param in getfullargspec(
                             getattr(self.camb.CAMBparams, non_param_func)).args[1:]:
                         if fixed_param in args:
-                            raise LoggedError(
-                                self.log, "Trying to sample fixed theory parameter %s",
-                                fixed_param)
+                            raise LoggedError(self.log,
+                                              "Trying to sample fixed theory parameter %s",
+                                              fixed_param)
                         self._reduced_extra_args.pop(fixed_param, None)
                 if self.extra_attrs:
                     self.log.debug("Setting attributes of CAMBparams: %r",
                                    self.extra_attrs)
                 for attr, value in self.extra_attrs.items():
-                    obj = params
-                    if '.' in attr:
-                        parts = attr.split('.')
-                        for p in parts[:-1]:
-                            obj = getattr(obj, p)
-                        par = parts[-1]
-                    else:
-                        par = attr
-                    if hasattr(obj, par):
-                        setattr(obj, par, value)
+                    if hasattr(params, attr):
+                        setattr(params, attr, value)
                     else:
                         raise LoggedError(
                             self.log,
