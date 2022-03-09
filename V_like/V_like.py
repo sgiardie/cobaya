@@ -38,7 +38,7 @@ class V_like(Likelihood):
 
          e.g. here we need C_L^{vv} to lmax=2500 and the H0 value
         """
-        return {'Cl': {'vv': self.bin_max[-1]}} 
+        return {'Cl': {'vv': self.bin_max[-1].astype('int')}} 
 
     def logp(self, **params_values):
         """
