@@ -17,10 +17,10 @@ likelihood:
   planck_2018_highl_plik.TTTEEE: null
   planck_2018_lensing.clik: null
   bicep_keck_2018: null
-  V_like.V_like:
-    python_path: /home/sgiardie/camb_cpt/cobaya/V_like
+  v_like.v_like:
+    python_path: /home/sgiardie/camb_cpt/cobaya/v_like
     #cl_file overrides the one in the V_like.yaml
-    cl_file: /home/sgiardie/camb_cpt/cobaya/V_like/data/Vmodes_CLASS.txt  
+    cl_file: /home/sgiardie/camb_cpt/cobaya/v_like/data/Vmodes_CLASS.txt  
 params:
   logA:
     prior:
@@ -194,5 +194,5 @@ sampler:
 
 packages_path: /home/sgiardie/camb_cpt/cobaya/packages
 
-output: prova_VV/mcmc
+output: ../prova_VV/mcmc
 

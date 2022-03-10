@@ -1,7 +1,7 @@
 from cobaya.likelihood import Likelihood
 import numpy as np
 
-class V_like(Likelihood):
+class v_like(Likelihood):
 
     def initialize(self):
         """
@@ -14,10 +14,18 @@ class V_like(Likelihood):
         #each bin is 12 ell large
         if self.data.shape[1] == 3:
             #self.bin_center = self.data[:,0]
-            self.bin_min = self.data[:,0]-6.*np.ones_like(self.data[:,0])
-            self.bin_max = self.data[:,0]+6.*np.ones_like(self.data[:,0])
+            self.bin_min = self.data[:,0].astype('int')-6*np.ones(self.data[:,0].size,dtype = int)
+            self.bin_max = self.data[:,0].astype('int')+5*np.ones(self.data[:,0].size,dtype = int)
             self.ClVV_data = self.data[:,1]
             self.ClVV_err = self.data[:,2]
+        
+        #other class data file:
+        if self.data.shape[1] == 4:
+            self.bin_min = self.data[:,0].astype('int')-5*np.ones(self.data[:,0].size,dtype = int)
+            self.bin_max = self.data[:,0].astype('int')+6*np.ones(self.data[:,0].size,dtype = int)
+            self.ClVV_data = self.data[:,1]
+            self.ClVV_err = self.data[:,2]
+
 
         #spider data files
         elif self.data.shape[1] == 6:
@@ -32,13 +40,14 @@ class V_like(Likelihood):
         else:
             print("Error: not using the correct spider or Class data!")
 
+
     def get_requirements(self):
         """
          return dictionary specifying quantities calculated by a theory code are needed
 
          e.g. here we need C_L^{vv} to lmax=2500 and the H0 value
         """
-        return {'Cl': {'vv': self.bin_max[-1].astype('int')}} 
+        return {'Cl': {'vv': self.bin_max[-1]}} 
 
     def logp(self, **params_values):
         """
@@ -54,7 +63,7 @@ class V_like(Likelihood):
         """
         chi2 =  0
         for i in range(self.data.shape[0]):
-            ClVV_th_bin = ClVV_th[self.bin_min[i].astype('int'):self.bin_max[i].astype('int')].sum()/(self.bin_max[i]-self.bin_min[i])
+            ClVV_th_bin = ClVV_th[self.bin_min[i]:self.bin_max[i]].sum()/(self.bin_max[i]-self.bin_min[i]+1)
             chi2 += (ClVV_th_bin - self.ClVV_data[i])**2/(self.ClVV_err[i])**2
         
         return -chi2/2.
