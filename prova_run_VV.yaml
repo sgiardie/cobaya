@@ -19,8 +19,6 @@ likelihood:
   bicep_keck_2018: null
   v_like.VLike:
     python_path: /home/sgiardie/camb_cpt/cobaya/v_like
-    #cl_file overrides the one in the VLike.yaml
-    cl_file: /home/sgiardie/camb_cpt/cobaya/v_like/data/Vmodes_CLASS.txt  
 params:
   logA:
     prior:
