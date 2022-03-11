@@ -1,7 +1,7 @@
 from cobaya.likelihood import Likelihood
 import numpy as np
 
-class v_like(Likelihood):
+class VLike(Likelihood):
 
     def initialize(self):
         """

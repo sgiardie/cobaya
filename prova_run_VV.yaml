@@ -17,9 +17,9 @@ likelihood:
   planck_2018_highl_plik.TTTEEE: null
   planck_2018_lensing.clik: null
   bicep_keck_2018: null
-  v_like.v_like:
+  v_like.VLike:
     python_path: /home/sgiardie/camb_cpt/cobaya/v_like
-    #cl_file overrides the one in the V_like.yaml
+    #cl_file overrides the one in the VLike.yaml
     cl_file: /home/sgiardie/camb_cpt/cobaya/v_like/data/Vmodes_CLASS.txt  
 params:
   logA:

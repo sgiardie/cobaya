@@ -1,1 +1,1 @@
-from .v_like import v_like
+from .v_like import VLike
