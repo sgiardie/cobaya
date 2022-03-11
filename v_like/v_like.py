@@ -40,6 +40,8 @@ class v_like(Likelihood):
         else:
             print("Error: not using the correct spider or Class data!")
 
+       
+        self.log.info("Initialized!")
 
     def get_requirements(self):
         """
