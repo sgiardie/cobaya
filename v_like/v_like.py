@@ -37,9 +37,9 @@ class VLike(Likelihood):
         """
          return dictionary specifying quantities calculated by a theory code are needed
 
-         e.g. here we need C_L^{vv} to lmax=2500 and the H0 value
-        """
-        return {'Cl': {'vv': self.lmax_sp150[-1]}} 
+         e.g. here we need C_L^{vv} to lmax=1000 (default in the .yaml, can be changed) 
+         """
+        return {'Cl': {'vv': self.lmax}} 
 
     def logp(self, **params_values):
         """
