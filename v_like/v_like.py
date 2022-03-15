@@ -39,7 +39,10 @@ class VLike(Likelihood):
 
          e.g. here we need C_L^{vv} to lmax=1000 (default in the .yaml, can be changed) 
          """
-        return {'Cl': {'vv': self.lmax}} 
+        if self.lmax >= self.lmax_sp95[-1]:
+            return {'Cl': {'vv': self.lmax}}
+        else:
+            print("Error: lmax of theory is smaller than the lmax of data!")
 
     def logp(self, **params_values):
         """
