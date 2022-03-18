@@ -19,7 +19,7 @@ from scipy.linalg import sqrtm
 from cobaya.log import LoggedError
 from cobaya.likelihoods.base_classes import DataSetLikelihood
 
-CMB_keys = ['tt', 'te', 'ee', 'bb']
+CMB_keys = ['tt', 'te', 'ee', 'bb', 'vv']
 
 
 class CMBlikes(DataSetLikelihood):
@@ -223,7 +223,7 @@ class CMBlikes(DataSetLikelihood):
         return cls
 
     def init_params(self, ini):
-        self.field_names = getattr(self, 'field_names', ['T', 'E', 'B', 'P'])
+        self.field_names = getattr(self, 'field_names', ['T', 'E', 'B', 'V', 'P'])
         self.tot_theory_fields = len(self.field_names)
         self.map_names = ini.split('map_names', default=[])
         self.has_map_names = bool(self.map_names)
@@ -713,6 +713,7 @@ def save_cl_dict(filename, array_dict, lmin=2, lmax=None,
 
 
 def make_forecast_cmb_dataset(fiducial_Cl, output_root, output_dir=None,
+                              beta_degrees=None,
                               noise_muK_arcmin_T=None,
                               noise_muK_arcmin_P=None,
                               NoiseVar=None, ENoiseFac=2, fwhm_arcmin=None,
@@ -725,7 +726,7 @@ def make_forecast_cmb_dataset(fiducial_Cl, output_root, output_dir=None,
     If you want to use numerical N_L CMB noise files, you can just replace the noise
     .dat text file produced by this function.
 
-    :param fiducial_Cl: dictionary of Cls to use, combination of tt, te, ee, bb, pp;
+    :param fiducial_Cl: dictionary of Cls to use, combination of tt, te, ee, bb, vv, pp;
                         note te must be included with tt and ee when using them
     :param output_root: root name for output files, e.g. 'my_sim1'
     :param output_dir: output directory
@@ -743,6 +744,7 @@ def make_forecast_cmb_dataset(fiducial_Cl, output_root, output_dir=None,
     :param lens_recon_noise: optional array, starting at L=0, for the
        pp lensing reconstruction noise, in [L(L+1)]^2C_L^phi/2pi units
     :param cl_dict_lmin: l_min for the arrays in fiducial_Cl
+    :param beta_degrees: departure (phase-shift) from non-ideality of a half-wave plate for circular polarization 
     :return: IniFile that was saved
     """
     ini = IniFile()
@@ -768,6 +770,8 @@ def make_forecast_cmb_dataset(fiducial_Cl, output_root, output_dir=None,
             fields_use += ' E'
         if 'bb' in cl_keys:
             fields_use += ' B'
+        if 'vv' in cl_keys:
+            fields_use += ' V'    
         if 'pp' in cl_keys and use_lensing:
             fields_use += ' P'
         if 'tt' in cl_keys and 'ee' in cl_keys and 'te' not in cl_keys:
@@ -783,9 +787,12 @@ def make_forecast_cmb_dataset(fiducial_Cl, output_root, output_dir=None,
 
     if use_CMB:
         fwhm = fwhm_arcmin / 60
+        if beta_degrees == 0:
+            beta_degrees = 1.0e-09
+        beta = beta_degrees * np.pi / 180 
         xlc = 180 * np.sqrt(8. * np.log(2.)) / np.pi
         sigma2 = (fwhm / xlc) ** 2
-        noise_cols = 'TT           EE          BB'
+        noise_cols = 'TT           EE          BB          VV'
         if use_lensing:
             noise_cols += '          PP'
     elif use_lensing:
@@ -802,7 +809,7 @@ def make_forecast_cmb_dataset(fiducial_Cl, output_root, output_dir=None,
                 # noinspection PyUnboundLocalVariable
                 noise_cl = ell * (ell + 1.) / 2 / np.pi * NoiseVar * np.exp(
                     ell * (ell + 1) * sigma2)
-                noises += [noise_cl, ENoiseFac * noise_cl, ENoiseFac * noise_cl]
+                noises += [noise_cl, ENoiseFac * noise_cl/np.cos(beta/2)**2, ENoiseFac * noise_cl/np.cos(beta/2)**2, ENoiseFac * noise_cl/np.sin(beta)]
             if use_lensing:
                 noises += [lens_recon_noise[ell]]
             f.write("%d " % ell + " ".join("%E" % elem for elem in noises) + "\n")
