@@ -1,5 +1,5 @@
-cl_class: /home/sgiardie/camb_cpt/cobaya/v_like/data/CLASS_40GHz_vlim.txt
-cl_sp150: /home/sgiardie/camb_cpt/cobaya/v_like/data/spider150.txt
-cl_sp95: /home/sgiardie/camb_cpt/cobaya/v_like/data/spider95.txt
+cl_class: data/CLASS_40GHz_vlim.txt
+cl_sp150: data/spider150.txt
+cl_sp95: data/spider95.txt
 #set as the default for lmax_AF=1000, can be overwritten
 lmax: 1000

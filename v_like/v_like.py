@@ -1,5 +1,6 @@
 from cobaya.likelihood import Likelihood
 import numpy as np
+import os 
 
 class VLike(Likelihood):
 
@@ -8,9 +9,12 @@ class VLike(Likelihood):
         Importing data file cl_file set in .yaml file
         cl_file can be Vmodes_CLASS.txt or spider(150/95).txt
         """
-        self.data_C = np.loadtxt(self.cl_class, skiprows = 1)
-        self.data_sp150 = np.loadtxt(self.cl_sp150, skiprows = 1)
-        self.data_sp95 = np.loadtxt(self.cl_sp95, skiprows = 1)
+
+        curpath = os.path.dirname(os.path.abspath(__file__))+'/'
+
+        self.data_C = np.loadtxt(curpath + self.cl_class, skiprows = 1)
+        self.data_sp150 = np.loadtxt(curpath + self.cl_sp150, skiprows = 1)
+        self.data_sp95 = np.loadtxt(curpath + self.cl_sp95, skiprows = 1)
 
         #binning for CLASS data: bin center from file
         #each bin is 12 ell large
