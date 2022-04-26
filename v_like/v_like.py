@@ -65,13 +65,15 @@ class VLike(Likelihood):
             ClVV_th_bin_C = ClVV_th[self.lmin_C[i]:self.lmax_C[i]].sum()/(self.lmax_C[i]-self.lmin_C[i]+1)
             chi2 += (ClVV_th_bin_C - self.ClVV_data_C[i])**2/(self.ClVV_err_C[i])**2
        
-        for i in range(self.data_sp150.shape[0]):
-            ClVV_th_bin_sp150 = ClVV_th[self.lmin_sp150[i]:self.lmax_sp150[i]].sum()/(self.lmax_sp150[i]-self.lmin_sp150[i]+1)
-            chi2 += (ClVV_th_bin_sp150 - self.ClVV_data_sp150[i])**2/(self.ClVV_err_sp150[i])**2
+        if self.spider_data:
+            print('including SPIDER data in chi2 computation')
+            for i in range(self.data_sp150.shape[0]):
+                ClVV_th_bin_sp150 = ClVV_th[self.lmin_sp150[i]:self.lmax_sp150[i]].sum()/(self.lmax_sp150[i]-self.lmin_sp150[i]+1)
+                chi2 += (ClVV_th_bin_sp150 - self.ClVV_data_sp150[i])**2/(self.ClVV_err_sp150[i])**2
           
-        for i in range(self.data_sp95.shape[0]):
-            ClVV_th_bin_sp95 = ClVV_th[self.lmin_sp95[i]:self.lmax_sp95[i]].sum()/(self.lmax_sp95[i]-self.lmin_sp95[i]+1)
-            chi2 += (ClVV_th_bin_sp95 - self.ClVV_data_sp95[i])**2/(self.ClVV_err_sp95[i])**2
+            for i in range(self.data_sp95.shape[0]):
+                ClVV_th_bin_sp95 = ClVV_th[self.lmin_sp95[i]:self.lmax_sp95[i]].sum()/(self.lmax_sp95[i]-self.lmin_sp95[i]+1)
+                chi2 += (ClVV_th_bin_sp95 - self.ClVV_data_sp95[i])**2/(self.ClVV_err_sp95[i])**2
 
         return -chi2/2.
 

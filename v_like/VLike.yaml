@@ -3,3 +3,4 @@ cl_sp150: data/spider150.txt
 cl_sp95: data/spider95.txt
 #set as the default for lmax_AF=1000, can be overwritten
 lmax: 1000
+spider_data: True
