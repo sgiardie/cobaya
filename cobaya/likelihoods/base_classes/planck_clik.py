@@ -11,13 +11,15 @@ import os
 import sys
 import numpy as np
 from typing import Any
+from packaging import version
 
 # Local
 from cobaya.likelihood import Likelihood
 from cobaya.log import LoggedError, get_logger
 from cobaya.input import get_default_info
 from cobaya.install import pip_install, download_file, NotInstalledError
-from cobaya.tools import are_different_params_lists, create_banner, load_module
+from cobaya.tools import are_different_params_lists, create_banner, load_module, \
+    VersionCheckError
 from cobaya.conventions import packages_path_input
 
 _deprecation_msg_2015 = create_banner("""
@@ -28,6 +30,7 @@ by the 2018 ones, and will eventually be deprecated.
 pla_url_prefix = r"https://pla.esac.esa.int/pla-sl/data-action?COSMOLOGY.COSMOLOGY_OID="
 
 last_version_supp_data_and_covmats = "v2.01"
+last_version_clik = "3.1"
 
 
 class PlanckClik(Likelihood):
@@ -158,10 +161,11 @@ class PlanckClik(Likelihood):
                 os.path.join(kwargs["path"], "code", code_path)),
                 check=kwargs.get("check", True)))
         if kwargs.get("data", True):
+            # NB: will never raise VersionCheckerror, since version number is in the path
             _, filename = get_product_id_and_clik_file(cls.get_qualified_class_name())
             result &= os.path.exists(os.path.realpath(
                 os.path.join(kwargs["path"], "data", data_path, filename)))
-            # Check for additional data and covmats
+            # Check for additional data and covmats -- can raise VersionCheckerror
             from cobaya.likelihoods.planck_2018_lensing import native
             result &= native.is_installed(**kwargs)
         return result
@@ -204,7 +208,11 @@ class PlanckClik(Likelihood):
                 product_id, _ = get_product_id_and_clik_file(name)
                 # Download and decompress the particular likelihood
                 url = pla_url_prefix + product_id
-                if not download_file(url, paths["data"], decompress=True,
+                # Helper for the progress bars: some known product download sizes
+                # (no actual effect if missing or wrong!)
+                size = {"1900": 314153370, "1903": 4509715660, "151902": 60293120,
+                        "151905": 5476083302, "151903": 8160437862}.get(product_id)
+                if not download_file(url, paths["data"], size=size, decompress=True,
                                      logger=log, no_progress_bars=no_progress_bars):
                     log.error("Not possible to download this likelihood.")
                     success = False
@@ -260,8 +268,15 @@ def is_installed_clik(path, allow_global=False, check=True):
     clik_path = None
     if isinstance(path, str) and path.lower() != "global":
         try:
-            clik_path = os.path.join(
-                get_clik_source_folder(path), 'lib/python/site-packages')
+            clik_src_path = get_clik_source_folder(path)
+            installed_version = version.parse(clik_src_path.rstrip(os.sep).split("-")[1])
+            if installed_version < version.parse(last_version_clik):
+                raise VersionCheckError(
+                    f"Installed version ({installed_version}) "
+                    f"older than minimum required one ({last_version_clik}).")
+            elif installed_version > version.parse(last_version_clik):
+                raise ValueError("This should not happen: min version needs update.")
+            clik_path = os.path.join(clik_src_path, 'lib/python/site-packages')
         except FileNotFoundError:
             func("The given folder does not exist: '%s'", clik_path or path)
             return False
@@ -272,7 +287,7 @@ def is_installed_clik(path, allow_global=False, check=True):
     else:
         log.info("Importing *auto-installed* clik (but defaulting to *global*).")
     try:
-        return load_module("clik", path=clik_path)
+        return load_module("clik", path=clik_path, reload=check)
     except ImportError:
         if path is not None and path.lower() != "global":
             func("Couldn't find the clik python interface at '%s'. "
@@ -321,7 +336,7 @@ def install_clik(path, no_progress_bars=False):
             raise LoggedError(log, "Failed installing '%s'.", req)
     log.info("Downloading...")
     click_url = pla_url_prefix + '152000'
-    if not download_file(click_url, path, decompress=True,
+    if not download_file(click_url, path, size=2369782, decompress=True,
                          no_progress_bars=no_progress_bars, logger=log):
         log.error("Not possible to download clik.")
         return False

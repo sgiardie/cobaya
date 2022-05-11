@@ -48,6 +48,7 @@ CLASS will be loaded from the automatic-install ``packages_path`` folder, if spe
 otherwise imported as a globally-installed Python package. Cobaya will print at
 initialisation where it is getting CLASS from.
 
+
 .. _classy_modify:
 
 Modifying CLASS
@@ -69,6 +70,15 @@ whenever the computation of any observable would fail, but you do not expect tha
 observable to be compatible with the data (e.g. at the fringes of the parameter
 space). Whenever such an error is raised during sampling, the likelihood is assumed to be
 zero, and the run is not interrupted.
+
+.. note::
+
+   If your modified CLASS has a lower version number than the minimum required by Cobaya,
+   you will get an error at initialisation. You may still be able to use it by setting the
+   option ``ignore_obsolete: True`` in the ``camb`` block (though you would be doing that
+   at your own risk; ideally you should translate your modification to a newer CLASS
+   version, in case there have been important fixes since the release of your baseline
+   version).
 
 
 Installation
@@ -135,6 +145,7 @@ interface ready.
 # Global
 import sys
 import os
+import re
 import numpy as np
 from copy import deepcopy
 from typing import NamedTuple, Sequence, Union, Optional, Callable, Any
@@ -144,9 +155,8 @@ from cobaya.theories.cosmo import BoltzmannBase
 from cobaya.log import LoggedError, get_logger
 from cobaya.install import download_github_release, pip_install, NotInstalledError, \
     check_gcc_version
-from cobaya.tools import load_module, VersionCheckError, Pool1D, Pool2D, PoolND, \
+from cobaya.tools import load_module, Pool1D, Pool2D, PoolND, \
     combine_1d
-from cobaya.typing import empty_dict
 
 
 # Result collector
@@ -173,11 +183,12 @@ class classy(BoltzmannBase):
 
     # Name of the Class repo/folder and version to download
     _classy_repo_name = "lesgourg/class_public"
-    _min_classy_version = "v3.1.2"
+    _min_classy_version = "v3.2.0"
     _classy_min_gcc_version = "6.4"  # Lower ones are possible atm, but leak memory!
     _classy_repo_version = os.environ.get('CLASSY_REPO_VERSION', _min_classy_version)
 
     classy_module: Any
+    ignore_obsolete: bool
 
     def initialize(self):
         """Importing CLASS from the correct path, if given, and if not, globally."""
@@ -185,8 +196,9 @@ class classy(BoltzmannBase):
         allow_global = not self.path
         if not self.path and self.packages_path:
             self.path = self.get_path(self.packages_path)
+        min_version = None if self.ignore_obsolete else self._classy_repo_version
         self.classy_module = self.is_installed(path=self.path, allow_global=allow_global,
-                                               check=False)
+                                               check=False, min_version=min_version)
         if not self.classy_module:
             raise NotInstalledError(
                 self.log, "Could not find CLASS. Check error message above.")
@@ -597,10 +609,11 @@ class classy(BoltzmannBase):
             log.error("Either CLASS is not in the given folder, "
                       "'%s', or you have not compiled it.", path)
             return None
-        py_version = "%d.%d" % (sys.version_info.major, sys.version_info.minor)
+        re_lib = re.compile(
+            f"^lib\\..*{sys.version_info.major}\\.*{sys.version_info.minor}$")
         try:
             post = next(d for d in os.listdir(classy_build_path)
-                        if (d.startswith("lib.") and py_version in d))
+                        if re.fullmatch(re_lib, d))
         except StopIteration:
             log.error("The CLASS installation at '%s' has not been compiled for the "
                       "current Python version.", path)
@@ -640,8 +653,9 @@ class classy(BoltzmannBase):
             log.info("Importing *auto-installed* CLASS (but defaulting to *global*).")
             classy_build_path = cls.get_import_path(path)
         try:
-            return load_module(
-                'classy', path=classy_build_path, min_version=cls._classy_repo_version)
+            min_version = kwargs.get("min_version", cls._classy_repo_version)
+            return load_module("classy", path=classy_build_path,
+                               min_version=min_version, reload=check)
         except ImportError:
             if path is not None and path.lower() != "global":
                 func("Couldn't find the CLASS python interface at '%s'. "
@@ -651,9 +665,6 @@ class classy(BoltzmannBase):
                           "Specify a Cobaya or CLASS installation path, "
                           "or install the CLASS Python interface globally with "
                           "'cd /path/to/class/python/ ; python setup.py install'")
-            return False
-        except VersionCheckError as e:
-            log.error(str(e))
             return False
 
     @classmethod
@@ -670,7 +681,7 @@ class classy(BoltzmannBase):
         log.info("Downloading classy...")
         success = download_github_release(
             os.path.join(path, "code"), cls._classy_repo_name, cls._classy_repo_version,
-            repo_rename=cls.__name__, no_progress_bars=no_progress_bars, logger=log)
+            directory=cls.__name__, no_progress_bars=no_progress_bars, logger=log)
         if not success:
             log.error("Could not download classy.")
             return False

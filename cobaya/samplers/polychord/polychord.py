@@ -18,7 +18,7 @@ import re
 
 # Local
 from cobaya.tools import read_dnumber, get_external_function, \
-    find_with_regexp, NumberWithUnits, load_module, VersionCheckError
+    find_with_regexp, NumberWithUnits, load_module
 from cobaya.sampler import Sampler
 from cobaya.mpi import is_main_process, share_mpi, sync_processes
 from cobaya.collection import SampleCollection
@@ -35,7 +35,7 @@ class polychord(Sampler):
     """
     # Name of the PolyChord repo and version to download
     _pc_repo_name = "PolyChord/PolyChordLite"
-    _pc_repo_version = "1.18.2"
+    _pc_repo_version = "1.20.1"
     _base_dir_suffix = "polychord_raw"
     _clusters_dir = "clusters"
     _at_resume_prefer_old = Sampler._at_resume_prefer_old + ["blocking"]
@@ -84,7 +84,7 @@ class polychord(Sampler):
             if getattr(self, p) is not None:
                 setattr(self, p, NumberWithUnits(
                     getattr(self, p), "d", scale=self.nDims, dtype=int).value)
-        self._quants_nlive_units = ["nprior"]
+        self._quants_nlive_units = ["nprior", "nfail"]
         for p in self._quants_nlive_units:
             if getattr(self, p) is not None:
                 setattr(self, p, NumberWithUnits(
@@ -138,13 +138,13 @@ class polychord(Sampler):
             int(o * read_dnumber(self.num_repeats, dim_block))
             for o, dim_block in zip(oversampling_factors, self.grade_dims)]
         # Assign settings
-        pc_args = ["nlive", "num_repeats", "nprior", "do_clustering",
-                   "precision_criterion", "max_ndead", "boost_posterior", "feedback",
-                   "logzero", "posteriors", "equals", "compression_factor",
-                   "cluster_posteriors", "write_resume", "read_resume", "write_stats",
-                   "write_live", "write_dead", "base_dir", "grade_frac", "grade_dims",
-                   "feedback", "read_resume", "base_dir", "file_root", "grade_frac",
-                   "grade_dims"]
+        pc_args = ["nlive", "num_repeats", "nprior", "nfail", "do_clustering",
+                   "feedback", "precision_criterion", "logzero",
+                   "max_ndead", "boost_posterior", "posteriors", "equals",
+                   "cluster_posteriors", "write_resume", "read_resume",
+                   "write_stats", "write_live", "write_dead", "write_prior",
+                   "maximise", "compression_factor", "synchronous", "base_dir",
+                   "file_root", "grade_dims", "grade_frac", "nlives"]
         # As stated above, num_repeats is ignored, so let's not pass it
         pc_args.pop(pc_args.index("num_repeats"))
         settings: Any = load_module('pypolychord.settings', path=self._poly_build_path,
@@ -489,9 +489,8 @@ class polychord(Sampler):
             poly_build_path = cls.get_import_path(path)
         cls._poly_build_path = poly_build_path
         try:
-            # TODO: add min_version when polychord module version available
-            return load_module(
-                'pypolychord', path=poly_build_path, min_version=None)
+            return load_module("pypolychord", path=poly_build_path,
+                               min_version=cls._pc_repo_version, reload=check)
         except ModuleNotFoundError:
             if path is not None and path.lower() != "global":
                 log.error("Couldn't find the PolyChord python interface at '%s'. "
@@ -505,9 +504,6 @@ class polychord(Sampler):
         except ImportError as e:
             log.error("Couldn't load the PolyChord python interface in %s:\n"
                       "%s", poly_build_path or "global", e)
-            return False
-        except VersionCheckError as e:
-            log.error(str(e))
             return False
 
     @classmethod
