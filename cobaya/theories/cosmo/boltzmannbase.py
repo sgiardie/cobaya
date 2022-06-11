@@ -419,9 +419,9 @@ class BoltzmannBase(Theory):
         Get a :math:`P(z,k)` bicubic interpolation object
         (:class:`PowerSpectrumInterpolator`).
 
-        In the interpolator returned, both the input :math:`k` and resulting
-        :math:`P(z,k)` values are in units of :math:`1/\mathrm{Mpc}` (not :math:`h^{-1}`
-        units).
+        In the interpolator returned, the input :math:`k` and resulting
+        :math:`P(z,k)` are in units of :math:`1/\mathrm{Mpc}` and
+        :math:`\mathrm{Mpc}^3` respectively (not in :math:`h^{-1}` units).
 
         :param var_pair: variable pair for power spectrum
         :param nonlinear: non-linear spectrum (default True)
@@ -464,9 +464,10 @@ class BoltzmannBase(Theory):
         Returned arrays may be bigger or more densely sampled than requested, but will
         include required values.
 
-        In the grid returned, both :math:`k` and :math:`P(z,k)` values are in units of
-        :math:`1/\mathrm{Mpc}` (not :math:`h^{-1}` units), and :math:`z` and :math:`k`
-        are in **ascending** order.
+        In the grid returned, :math:`k` and :math:`P(z,k)` are in units of
+        :math:`1/\mathrm{Mpc}` and :math:`\mathrm{Mpc}^3` respectively
+        (not in :math:`h^{-1}` units), and :math:`z` and :math:`k` are in
+        **ascending** order.
 
         :param nonlinear: whether the linear or non-linear spectrum
         :param var_pair: which power spectrum
@@ -572,7 +573,7 @@ class PowerSpectrumInterpolator(RectBivariateSpline):
         z, k = (np.atleast_1d(x) for x in [z, k])
         if len(z) < 4:
             raise ValueError('Require at least four redshifts for Pk interpolation.'
-                             'Consider using Pk_grid if you just need a a small number'
+                             'Consider using Pk_grid if you just need a small number'
                              'of specific redshifts (doing 1D splines in k yourself).')
         z, k, P_or_logP = np.array(z), np.array(k), np.array(P_or_logP)
         i_z = np.argsort(z)

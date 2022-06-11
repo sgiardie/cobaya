@@ -20,7 +20,7 @@ from cobaya.conventions import overhead_time, debug_default, get_chi2_name, \
     packages_path_input
 from cobaya.typing import InfoDict, InputDict, LikesDict, TheoriesDict, \
     ParamsDict, PriorsDict, ParamValuesDict, empty_dict, unset_params
-from cobaya.input import update_info, load_input_dict
+from cobaya.input import update_info, load_info_overrides
 from cobaya.parameterization import Parameterization
 from cobaya.prior import Prior
 from cobaya.likelihood import LikelihoodCollection, AbsorbUnusedParamsLikelihood, \
@@ -60,11 +60,18 @@ class LogPosterior:
     largest real numbers allowed by machine precision.
     """
 
-    logpost: Optional[float] = None
-    logpriors: Optional[Sequence[float]] = None
-    loglikes: Optional[Sequence[float]] = None
-    derived: Optional[Sequence[float]] = None
-    finite: Optional[bool] = False
+    # A note on typing:
+    # Though None is allowed for some arguments, after initialisation everything should
+    # be not None. So we can either (a) use Optional, and then get A LOT of typing errors
+    # or (b) not use it (use dataclasses.field(default=None) instead) and get fewer errors
+    # (only wherever LogPosterior is initialised).
+    # Let's opt for (b) and suppress errors there.
+
+    logpost: float = dataclasses.field(default=None)  # type: ignore
+    logpriors: Sequence[float] = dataclasses.field(default=None)  # type: ignore
+    loglikes: Sequence[float] = dataclasses.field(default=None)  # type: ignore
+    derived: Sequence[float] = dataclasses.field(default=None)  # type: ignore
+    finite: bool = dataclasses.field(default=False)
     logprior: float = dataclasses.field(init=False, repr=False)
     loglike: float = dataclasses.field(init=False, repr=False)
 
@@ -85,7 +92,7 @@ class LogPosterior:
             if self.logpriors is None or self.loglikes is None:
                 raise ValueError("If `logpost` not passed, both `logpriors` and "
                                  "`loglikes` must be passed.")
-            object.__setattr__(self, 'logpost', self.logprior + self.loglike)
+            object.__setattr__(self, 'logpost', self._logpost())
         elif self.logpriors is not None and self.loglikes is not None:
             if not self._logpost_is_consistent():
                 raise ValueError("The given log-posterior is not equal to the "
@@ -93,16 +100,19 @@ class LogPosterior:
                                  "%g != sum(%r) + sum(%r)" %
                                  (self.logpost, self.logpriors, self.loglikes))
 
+    def _logpost(self):
+        """Computes logpost from prior and likelihood product."""
+        return self.logprior + self.loglike
+
     def _logpost_is_consistent(self):
         """
         Checks that the sum of logpriors and loglikes (if present) add up to logpost, if
         passed.
         """
         if self.finite:
-            return np.isclose(np.nan_to_num(self.logpost),
-                              np.nan_to_num(self.logprior + self.loglike))
+            return np.isclose(np.nan_to_num(self.logpost), np.nan_to_num(self._logpost()))
         else:
-            return np.isclose(self.logpost, self.logprior + self.loglike)
+            return np.isclose(self.logpost, self._logpost())
 
     def make_finite(self):
         """
@@ -609,7 +619,7 @@ class Model(HasLogger):
             if results.logpost != -np.inf:
                 break
         else:
-            if self.prior.reference_is_pointlike():
+            if self.prior.reference_is_pointlike:
                 raise LoggedError(self.log, "The reference point provided has null "
                                             "likelihood. Set 'ref' to a different point "
                                             "or a pdf.")
@@ -1327,9 +1337,18 @@ def get_model(info_or_yaml_or_file: Union[InputDict, str, os.PathLike],
     :return: a :class:`model.Model` instance.
 
     """
-    info = load_info_overrides(info_or_yaml_or_file, debug, stop_at_error,
-                               packages_path, override)
-    logger_setup(info.pop("debug", debug_default), info.pop("debug_file", None))
+    flags = {packages_path_input: packages_path, "debug": debug,
+             "stop_at_error": stop_at_error}
+    info = load_info_overrides(info_or_yaml_or_file, override or {}, **flags)
+    # MARKED FOR DEPRECATION IN v3.2
+    if info.get("debug_file"):
+        print("*WARNING* 'debug_file' will soon be deprecated. If you want to "
+              "save the debug output to a file, use 'debug: [filename]'.")
+        # BEHAVIOUR TO BE REPLACED BY AN ERROR
+        if info.get("debug"):
+            info["debug"] = info.pop("debug_file")
+    # END OF DEPRECATION BLOCK
+    logger_setup(info.get("debug"))
     # Inform about ignored info keys
     ignored_info = []
     for k in list(info):
@@ -1352,20 +1371,3 @@ def get_model(info_or_yaml_or_file: Union[InputDict, str, os.PathLike],
                  packages_path=info.get(packages_path_input),
                  timing=updated_info.get("timing"),
                  stop_at_error=info.get("stop_at_error", False))
-
-
-def load_info_overrides(info_or_yaml_or_file, debug, stop_at_error,
-                        packages_path, override=None) -> InputDict:
-    info = load_input_dict(info_or_yaml_or_file)  # makes deep copy if dict
-
-    if override:
-        if "post" in override:
-            info["resume"] = False
-        info = recursive_update(info, override, copied=False)
-    if packages_path:
-        info[packages_path_input] = packages_path
-    if debug is not None:
-        info["debug"] = debug if isinstance(debug, (int, str)) else bool(debug)
-    if stop_at_error is not None:
-        info["stop_at_error"] = bool(stop_at_error)
-    return info

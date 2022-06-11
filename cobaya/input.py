@@ -24,14 +24,14 @@ from cobaya.typing import InputDict, InfoDict, ModelDict, ExpandedParamsDict, Li
     empty_dict
 from cobaya.tools import recursive_update, str_to_list, get_base_classes, \
     fuzzy_match, deepcopy_where_possible
-from cobaya.component import get_component_class
+from cobaya.component import get_component_class, ComponentNotFoundError
 from cobaya.yaml import yaml_load_file, yaml_load
 from cobaya.log import LoggedError, get_logger
 from cobaya.parameterization import expand_info_param
 from cobaya import mpi
 
 # Logger
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 def load_input_dict(info_or_yaml_or_file: Union[InputDict, str, os.PathLike]
@@ -78,8 +78,8 @@ def load_input_file(input_file: Union[str, os.PathLike],
         except IOError:
             err_msg = "Not a valid input file, or non-existent run to resume."
             if help_commands:
-                err_msg += (" Maybe you mistyped one of the following commands: "
-                            + help_commands)
+                err_msg += \
+                    f" Maybe you mistyped one of the following commands: {help_commands}"
             raise ValueError(err_msg)
         # We need to update the output_prefix to resume the run *where it is*
         info["output"] = input_file
@@ -101,19 +101,23 @@ def load_input(input_file: str) -> InputDict:
     elif extension == Extension.dill:
         info = load_info_dump(input_file) or {}
     else:
-        raise LoggedError(log, "Extension of input file '%s' not recognized.", input_file)
-
+        raise LoggedError(
+            logger, "Extension of input file '%s' not recognized.", input_file)
     # if output_prefix not defined, default to input_file name (sans ext.) as prefix;
     if "output" not in info:
         info["output"] = file_name
     # warn if no output, since we are in shell-invocation mode.
     elif info["output"] is None:
-        log.warning("WARNING: Output explicitly suppressed with '%s: null'",
-                    "output")
+        logger.warning("WARNING: Output explicitly suppressed with '%s: null'",
+                       "output")
     # contained? Ensure that output is sent where it should
     if "CONTAINED" in os.environ:
-        for out in ("output", "debug_file"):
-            if info.get(out):
+        # MARKED FOR DEPRECATION IN v3.2
+        if info.get("debug_file") and info.get("debug"):
+            info["debug"] = info.pop("debug_file")
+        # END OF DEPRECATION BLOCK
+        for out in ("output", "debug"):
+            if isinstance(info.get(out), str):
                 if not info[out].startswith("/"):
                     info[out] = os.path.join(products_path, info[out])
     return info
@@ -123,6 +127,25 @@ def load_input(input_file: str) -> InputDict:
 @mpi.from_root
 def load_input_MPI(input_file) -> InputDict:
     return load_input(input_file)
+
+
+def load_info_overrides(*infos_or_yaml_or_files, **flags) -> InputDict:
+    """
+    Takes a number of input dictionaries (or paths to them), loads them and updates them,
+    the latter ones taking precedence.
+
+    If present, it updates the results with the kwargs if their value is not ``None``.
+
+    Returns a deep copy of the resulting updated input dict (non-copyable object are
+    retained).
+    """
+    info = load_input_dict(infos_or_yaml_or_files[0])  # makes deep copy if dict
+    for another_info in infos_or_yaml_or_files[1:]:
+        info = recursive_update(info, load_input_dict(another_info))
+    for flag, value in flags.items():
+        if value is not None:
+            info[flag] = value
+    return info
 
 
 # load from dill pickle, including any lambda functions or external classes
@@ -195,8 +218,8 @@ def get_used_components(*infos, return_infos=False):
                                 if a not in comps[kind]]
             except TypeError:
                 raise LoggedError(
-                    log, "Your input info is not well formatted at the '%s' block. "
-                         "It must be a dictionary {'%s_i':{options}, ...}. ",
+                    logger, ("Your input info is not well formatted at the '%s' block. "
+                             "It must be a dictionary {'%s_i':{options}, ...}. "),
                     kind, kind)
             if return_infos:
                 for c in comps[kind]:
@@ -214,13 +237,17 @@ def get_default_info(component_or_class, kind=None, return_yaml=False,
     Get default info for a component_or_class.
     """
     try:
-        cls = get_component_class(component_or_class, kind, component_path, class_name)
+        cls = get_component_class(component_or_class, kind, component_path, class_name,
+                                  logger=logger)
         default_component_info = \
             cls.get_defaults(return_yaml=return_yaml,
                              yaml_expand_defaults=yaml_expand_defaults,
                              input_options=input_options)
+    except ComponentNotFoundError:
+        raise
     except Exception as e:
-        raise LoggedError(log, "Failed to get defaults for component or class '%s' [%s]",
+        raise LoggedError(logger,
+                          "Failed to get defaults for component or class '%s' [%s]",
                           component_or_class, e)
     if return_undefined_annotations:
         annotations = {k: v for k, v in cls.get_annotations().items() if
@@ -263,14 +290,15 @@ def update_info(info: _Dict, add_aggr_chi2=True) -> _Dict:
                 input_block[name] = input_block[name] or {}
             except TypeError:
                 raise LoggedError(
-                    log, "Your input info is not well formatted at the '%s' block. "
-                         "It must be a dictionary {'%s_i':{options}, ...}. ",
+                    logger, ("Your input info is not well formatted at the '%s' block. "
+                             "It must be a dictionary {'%s_i':{options}, ...}. "),
                     block, block)
             if isinstance(name, CobayaComponent) or isinstance(name, type):
-                raise LoggedError(log, "Instances and classes should be passed a "
-                                       "dictionary entry of the form 'name: instance'")
+                raise LoggedError(
+                    logger, ("Instances and classes should be passed a "
+                             "dictionary entry of the form 'name: instance'"))
             if isinstance(input_block[name], CobayaComponent):
-                log.warning("Support for input instances is experimental")
+                logger.warning("Support for input instances is experimental")
             if isinstance(input_block[name], type) or \
                     not isinstance(input_block[name], dict):
                 input_block[name] = {"external": input_block[name]}
@@ -310,8 +338,8 @@ def update_info(info: _Dict, add_aggr_chi2=True) -> _Dict:
                       if a else "'%s'" % o)
                      for o, a in alternatives.items()])
                 raise LoggedError(
-                    log, "%s '%s' does not recognize some options: %s. "
-                         "Check the documentation for '%s'.",
+                    logger, ("%s '%s' does not recognize some options: %s. "
+                             "Check the documentation for '%s'."),
                     block, name, did_you_mean, block)
             updated[name].update(input_block[name])
             # save params and priors of class to combine later
@@ -324,7 +352,7 @@ def update_info(info: _Dict, add_aggr_chi2=True) -> _Dict:
         for name, prior in prior_info.items():
             if updated_info["prior"].get(name, prior) != prior:
                 raise LoggedError(
-                    log, "Two different priors cannot have the same name: '%s'.", name)
+                    logger, "Two different priors cannot have the same name: '%s'.", name)
             updated_info["prior"][name] = prior
     # Add parameters info, after the necessary updates and checks
     defaults_merged = merge_default_params_info(default_params_info)
@@ -349,9 +377,9 @@ def update_info(info: _Dict, add_aggr_chi2=True) -> _Dict:
                 renames = item.get("renames")
                 if renames:
                     if not isinstance(renames, Mapping):
-                        raise LoggedError(log, "'renames' should be a dictionary of "
-                                               "name mappings "
-                                               "(or you meant to use 'aliases')")
+                        raise LoggedError(
+                            logger, ("'renames' should be a dictionary of name mappings "
+                                     "(or you meant to use 'aliases')"))
                     renames_flat = [set([k] + str_to_list(v)) for k, v in renames.items()]
                     for p in param_info:
                         # Probably could be made faster by inverting
@@ -363,8 +391,7 @@ def update_info(info: _Dict, add_aggr_chi2=True) -> _Dict:
                                 [a for a in renames_flat if p in a])
                             param_info[p]["renames"] = \
                                 list(set(chain(this_renames, str_to_list(
-                                    param_info[p].get("renames", []))))
-                                     .difference({p}))
+                                    param_info[p].get("renames", [])))).difference({p}))
     # Rest of the options
     for k, v in input_info.items():
         if k not in updated_info:
@@ -384,11 +411,11 @@ def merge_default_params_info(defaults: LikesDict):
             if p in defaults_merged:
                 if info != defaults_merged[p]:
                     raise LoggedError(
-                        log, "Parameter '%s' multiply defined, but inconsistent info: "
-                             "For likelihood '%s' is '%r', but for some other likelihood"
-                             " it was '%r'. Check your defaults!",
+                        logger, ("Parameter '%s' multiply defined, but inconsistent info:"
+                                 " For likelihood '%s' is '%r', but for some other "
+                                 "likelihood it was '%r'. Check your defaults!"),
                         p, lik, info, defaults_merged[p])
-                log.debug("Parameter '%s' is multiply defined but consistent.", p)
+                logger.debug("Parameter '%s' is multiply defined but consistent.", p)
             defaults_merged[p] = info
     return defaults_merged
 
@@ -462,11 +489,14 @@ def is_equal_info(info_old, info_new, strict=True, print_not_log=False, ignore_b
         myprint = print
         myprint_debug = lambda x: x
     else:
-        myprint = log.info
-        myprint_debug = log.debug
+        myprint = logger.info
+        myprint_debug = logger.debug
     myname = inspect.stack()[0][3]
-    ignore = set() if strict else \
-        {"debug", "debug_file", "resume", "force", packages_path_input, "test", "version"}
+    ignorable = {"debug", "resume", "force", packages_path_input, "test", "version"}
+    # MARKED FOR DEPRECATION IN v3.2
+    ignorable.add("debug_file")
+    # END OF DEPRECATION BLOCK
+    ignore = set() if strict else ignorable
     ignore = ignore.union(ignore_blocks or [])
     if set(info for info in info_old if info_old[info] is not None) - ignore \
             != set(info for info in info_new if info_new[info] is not None) - ignore:
@@ -523,7 +553,7 @@ def is_equal_info(info_old, info_new, strict=True, print_not_log=False, ignore_b
                                 if isinstance(block1[k], dict) else None
                             cls = get_component_class(
                                 k, kind=block_name, component_path=component_path,
-                                class_name=(block1[k] or {}).get("class"))
+                                class_name=(block1[k] or {}).get("class"), logger=logger)
                             ignore_k_this.update(set(
                                 getattr(cls, "_at_resume_prefer_new", {})))
                         except ImportError:
@@ -558,7 +588,7 @@ def get_preferred_old_values(info_old):
                     if isinstance(block[k], dict) else None
                 cls = get_component_class(
                     k, kind=block_name, component_path=component_path,
-                    class_name=(block[k] or {}).get("class"))
+                    class_name=(block[k] or {}).get("class"), logger=logger)
                 prefer_old_k_this = getattr(cls, "_at_resume_prefer_old", {})
                 if prefer_old_k_this:
                     if block_name not in keep_old:
@@ -581,7 +611,8 @@ def make_auto_params(auto_params, params_info):
 
     for k, v in auto_params.items():
         if '%s' not in k:
-            raise LoggedError(log, 'auto_param parameter names must have %s placeholder')
+            raise LoggedError(
+                logger, "auto_param parameter names must have '%s' placeholder")
         replacements = v.pop('auto_range')
         if isinstance(replacements, str):
             replacements = eval(replacements)

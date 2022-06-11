@@ -14,8 +14,9 @@ from packaging import version
 from cobaya.likelihood import Likelihood
 from cobaya.typing import InfoDict
 from cobaya.log import get_logger
-from cobaya.install import _version_filename, NotInstalledError
-from cobaya.tools import VersionCheckError
+from cobaya.install import _version_filename
+from cobaya.component import ComponentNotInstalledError
+from cobaya.tools import VersionCheckError, resolve_packages_path
 
 
 class InstallableLikelihood(Likelihood):
@@ -29,9 +30,22 @@ class InstallableLikelihood(Likelihood):
         # Ensure check for install and version errors
         # (e.g. may inherit from a class that inherits from this one, and not have them)
         if self.install_options:
-            if not self.is_installed(path=kwargs["packages_path"]):
-                raise NotInstalledError(
-                    "The data for this likelihood has not been correctly installed.")
+            name = self.get_qualified_class_name()
+            logger = get_logger(name)
+            packages_path = kwargs.get("packages_path") or resolve_packages_path()
+            old = False
+            try:
+                installed = self.is_installed(path=packages_path)
+            except Exception as excpt:  # catches VersionCheckError and unexpected ones
+                installed = False
+                old = isinstance(excpt, VersionCheckError)
+                logger.error(f"{type(excpt).__name__}: {excpt}")
+            if not installed:
+                not_or_old = ("is not up to date" if old
+                              else "has not been correctly installed")
+                raise ComponentNotInstalledError(
+                    logger, (f"The data for this likelihood {not_or_old}. To install it, "
+                             f"run `cobaya-install {name}{' --upgrade' if old else ''}`"))
         super().__init__(*args, **kwargs)
 
     @classmethod
@@ -66,7 +80,7 @@ class InstallableLikelihood(Likelihood):
     def is_installed(cls, **kwargs):
         """
         Performs an installation check and returns ``True`` if successful, ``False`` if
-        not, or raises `:class:`tools.VersionCheckError` if there is an obsolete
+        not, or raises :class:`tools.VersionCheckError` if there is an obsolete
         installation.
         """
         if kwargs.get("data", True):
@@ -77,8 +91,7 @@ class InstallableLikelihood(Likelihood):
                 return True
             elif not (os.path.exists(path) and len(os.listdir(path)) > 0):
                 log = get_logger(cls.get_qualified_class_name())
-                func = log.info if kwargs.get("check", True) else log.error
-                func("The given installation path does not exist: '%s'", path)
+                log.error("The given installation path does not exist: '%s'", path)
                 return False
             elif opts.get("github_release"):
                 try:
