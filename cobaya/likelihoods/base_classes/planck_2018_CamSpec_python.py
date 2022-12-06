@@ -72,8 +72,7 @@ class Planck2018CamSpecPython(DataSetLikelihood):
             used_ell = ini.params['use_range']
             if isinstance(used_ell, dict):
                 print('Using range %s' % used_ell)
-                for key, value in used_ell.items():
-                    used_ell[key] = range_to_ells(value)
+                used_ell = {key: range_to_ells(value) for key, value in used_ell.items()}
             else:
                 if silent:
                     print('CamSpec using range: %s' % used_ell)

@@ -415,7 +415,8 @@ def merge_default_params_info(defaults: LikesDict):
                                  " For likelihood '%s' is '%r', but for some other "
                                  "likelihood it was '%r'. Check your defaults!"),
                         p, lik, info, defaults_merged[p])
-                logger.debug("Parameter '%s' is multiply defined but consistent.", p)
+                if mpi.is_main_process():
+                    logger.debug("Parameter '%s' is multiply defined but consistent.", p)
             defaults_merged[p] = info
     return defaults_merged
 
@@ -492,7 +493,8 @@ def is_equal_info(info_old, info_new, strict=True, print_not_log=False, ignore_b
         myprint = logger.info
         myprint_debug = logger.debug
     myname = inspect.stack()[0][3]
-    ignorable = {"debug", "resume", "force", packages_path_input, "test", "version"}
+    ignorable = {"debug", "resume", "force", packages_path_input,
+                 "test", "version", "stop_at_error"}
     # MARKED FOR DEPRECATION IN v3.2
     ignorable.add("debug_file")
     # END OF DEPRECATION BLOCK

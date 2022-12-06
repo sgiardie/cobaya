@@ -14,6 +14,7 @@ from cobaya.tools import resolve_packages_path, load_module, get_base_classes, \
 from cobaya.conventions import packages_path_input, kinds, cobaya_package, \
     reserved_attributes
 from cobaya.yaml import yaml_load_file, yaml_dump
+from cobaya.mpi import is_main_process
 
 
 class Timer:
@@ -310,7 +311,9 @@ class CobayaComponent(HasLogger, HasDefaults):
         self._name = name or self.get_qualified_class_name()
         self.packages_path = packages_path or resolve_packages_path()
         # set attributes from the info (from yaml file or directly input dictionary)
+        annotations = self.get_annotations()
         for k, value in info.items():
+            self.validate_info(k, value, annotations)
             try:
                 # MARKED FOR DEPRECATION IN v3.0
                 # NB: cannot ever raise an error, since users may use "path_install" for
@@ -382,6 +385,22 @@ class CobayaComponent(HasLogger, HasDefaults):
         Whether to track version information for this component
         """
         return True
+
+    def validate_info(self, k: str, value: Any, annotations: dict):
+        """
+        Does any validation on parameter k read from an input dictionary or yaml file,
+        before setting the corresponding class attribute.
+        You could enforce consistency with annotations here, but does not by default.
+
+        :param k: name of parameter
+        :param value: value
+        :param annotations: resolved inherited dictionary of attributes for this class
+        """
+
+        # by default just test booleans, e.g. for typos of "false" which evaluate true
+        if annotations.get(k) is bool and value and isinstance(value, str):
+            raise AttributeError("Class '%s' parameter '%s' should be True "
+                                 "or False, got '%s'" % (self, k, value))
 
     @classmethod
     def get_kind(cls):
@@ -699,7 +718,9 @@ def _bare_load_external_module(name, path=None, min_version=None, reload=False,
         try:
             if get_import_path:
                 import_path = get_import_path(path)
-                logger.debug(f"'{name}' to be imported from (sub)directory {import_path}")
+                if is_main_process():
+                    logger.debug(
+                        f"'{name}' to be imported from (sub)directory {import_path}")
             else:
                 import_path = path
                 if not os.path.exists(import_path):
@@ -771,17 +792,21 @@ def load_external_module(module_name=None, path=None, install_path=None, min_ver
     else:
         msg_tried = "global import (no `path` or Cobaya installation path given)"
     try:
-        logger.debug(f"Attempting {msg_tried}.")
+        if is_main_process():
+            logger.debug(f"Attempting {msg_tried}.")
         module = _bare_load_external_module(not_installed_level="debug", **load_kwargs)
     except ComponentNotInstalledError:
         if default_global:
-            logger.debug("Defaulting to global import.")
+            if is_main_process():
+                logger.debug("Defaulting to global import.")
             load_kwargs["path"] = None
             module = _bare_load_external_module(
                 not_installed_level=not_installed_level, **load_kwargs)
         else:
             raise
     # Check from where was the module actually loaded
-    logger.info(f"`{module_name}` module loaded successfully from "
-                f"{os.path.dirname(os.path.realpath(os.path.abspath(module.__file__)))}")
+    if is_main_process():
+        logger.info(
+            f"`{module_name}` module loaded successfully from "
+            f"{os.path.dirname(os.path.realpath(os.path.abspath(module.__file__)))}")
     return module
