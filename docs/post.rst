@@ -12,6 +12,8 @@ The `post` component provides a way to post-process an existing sample in differ
 
    The domain of the new pdf (after post-processing) must be well-sampled over the domain of the old one. This may not happen when the new one has a larger domain (specially after removing likelihoods or removing/relaxing priors). In that case, it may be a good idea to redo the full sampling on the new model, instead of post-processing the old one.
 
+   To prevent this scenario, if you expect to reweigh your resulting sample, you may want to produce one with a higher-than-1 temperature (see :ref:`mcmc_tempered`).
+
 The requested operations are detailed in a ``post`` block, which may contain one ``add`` and one ``remove`` sub-block. Under ``add``, *using standard input syntax*, specify what you want to add during preprocessing, and under ``remove`` what you would like to remove (no options necessary for removed stuff: just a mention). To force an update of a prior/likelihood/derived-parameter, include it both under ``remove`` and ``add``, with the new options, if needed inside ``add``.
 
 The input sample is specified via the ``output`` option with the same value as the original sample. Cobaya will look for it and check that it is compatible with the requested operations. If multiple samples are found (e.g. from an MPI run), all of them are loaded and each processed separately. The resulting samples will have a suffix ``.post.[your_suffix]``, where ``[your_suffix]`` is specified with the ``suffix`` option of ``post`` (you can also change the original prefix [path and base for file name] by setting ``output: [new prefix]`` inside ``post``.
@@ -65,9 +67,8 @@ Let us generate the initial sample:
 
 .. code:: python
 
-   from cobaya.run import run
+   from cobaya import run
    updinfo, sampler = run(gaussian_info)
-   results = sampler.products()
 
 And let us define the additions and run post-processing:
 
@@ -95,15 +96,14 @@ And let us define the additions and run post-processing:
    info_post.update(post_info)
 
    from cobaya.post import post
-   updinfo_post, results_post = post(info_post, results["sample"])
+   updinfo_post, results_post = post(info_post, sampler.samples())
 
    # Load with GetDist and plot
-   from getdist.mcsamples import MCSamplesFromCobaya
    import getdist.plots as gdplt
    # %matplotlib inline  # if on a jupyter notebook
 
-   gdsamples_gaussian = MCSamplesFromCobaya(updinfo, results["sample"])
-   gdsamples_post = MCSamplesFromCobaya(updinfo_post, results_post["sample"])
+   gdsamples_gaussian = sampler.samples(to_getdist=True)
+   gdsamples_post = results_post.samples(to_getdist=True)
 
    p = gdplt.get_single_plotter(width_inch=6)
    p.plot_2d([gdsamples_gaussian, gdsamples_post], ["x", "y"], filled=True)
