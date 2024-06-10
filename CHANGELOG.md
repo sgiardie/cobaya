@@ -1,17 +1,141 @@
+## 3.5.1
+
+### General
+
+- Use of vector parameters now documented (PR #191; inspired by @lukashergt, thanks!)
+
+### Cosmology
+
+- Added DESI 1yr BAO data and SN from Pantheon Plus, DESY5 and Union3 (thanks DESI team, @adematti, @rubind, @WillMatt4 and @rodri981)
+
+## 3.5 – 2024-02-16
+
+### General
+
+- Updated UGE sample job submission template (for cobaya-job-run and cobaya-grid-run)
+- Clarify log feedback when using oversample_thin
+- Fixed #345, #346, #347, #348
+
+### Grid scripts
+- Support for running grids of models, including grid getdist, PDF tables, importance sampling, minimization (almost all features of CosmoMC grid now available in Cobaya). See the new doc pages.
+
+### Minimization
+- Support for iminuit minimizer and getting best-fits for all mpi runs (#332, thanks @ggalloni)
+- Support for minimization with an importance-sampled input yaml config
+
+## 3.4.1 – 2023-10-12
+
+### General
+
+- Fixed a packaging bug after migration to `pyproject.toml`
+
+### Cosmology
+
+#### CLASS
+
+- Min version update to 3.2.1 (solves #305; thanks to the CLASS developers)
+
+## 3.4 – 2023-10-11
+
+### General
+
+- Python 3.12 support (removed all dependence on distutils)
+- Improved `.products()` method for samplers (MCMC and PolyChord) and post-processing: samples can now retrieved simultaneously for all MPI processes, and converted to GetDist. Also added `.samples()` methods to retrieve just the samples.
+
+### Collections
+
+- Created a general `load_samples` function to load Cobaya results natively or as GetDist MCSamples.
+- Collections are now aware of whether they are part of a parallel batch, and warn if trying to reweight/detemper individually (fixes #321).
+- Fixed a bug with overzealous checks when loading samples (#306, thanks @mishakb for reporting).
+
+### MCMC
+
+- Fixed a bug with mpi runs partly stalling when run with many chains (#308, thanks @vivianmiranda @lukashergt for reporting and testing).
+- When `oversample_thin` is used, avg thinned weights now reported instead of acceptance rate (#310, thanks @vivianmiranda for reporting)
+
+### Cosmology
+
+#### BAO
+
+- Added 1-d grid LSS likelihood and BAO-only ELG and QSO (PR #266; thanks @msyriac)
+
+#### CLASS
+
+- Updated manual installation instructions and fixed some dependencies.
+- Made more derived parameters available, and documented how to access even more.
+- Fixed #292: wrong normalization for the Cl cross-spectra (thanks @carlosggarcia)
+
+## 3.3.2 – 2023-07-28
+
+### General
+
+- Class instance methods can now be used as external likelihoods.
+- Fix _prior_tries_warning bug
+- Fix over-stringent temperature test reading in chains
+
+### PolyChord
+
+- `products` method revamped; can produce GetDist chains directly.
+
+### Cosmology
+
+- updated CAMB min version to 1.5, fixing bug with Cobaya sampling
+- cobaya-install cosmo now installs set of Planck NPIPE (PR4) python likelihoods
+- added planck_2018_lowl.EE_sroll2 low-E Planck likelihood
+- added startup warning if initial points are very over-dispersed compared to the proposal covariance
+- Requesting CAMBdata from camb now a copy for exact initial power spectrum/non-linear model
+- CAMB now supports using sigma8 as an input parameter (thanks @tilmantroester)
+
+## 3.3.1 – 2023-04-04
+
+- Updates for Pandas 2 compatibility
+- Fixed bug in MCMC oversampling and simplified proposal code (#288) (thanks @JiangJQ2000)
+
+## 3.3 – 2023-03-29
+
+### General
+
+- Minimum Python version updated to 3.8
+- `Prior.bounds()` can now return bounds at particular confidence levels when passed `confidence<1`.
+- `SampleCollection` slicing now allows for advanced pandas slicing, e.g. `samples[samples["param"] > value]`.
+- Fixed bug when setting reference pdf in MPI runs (thanks @schoeneberg!)
+- Components in yaml files referring to external Python modules can now give `package_install` settings to specify whether installed from pip, github or URL when cobaya-install is run.
+- Fix for `post` when likelihoods return different number of derived parameters (#285) (thanks @zhaoruiyang98)
+
+### MCMC
+
+- Added tempered sampling.
+- `products` method revamped; can produce GetDist chains directly.
+
+### Cosmology
+
+- Replaced default planck_2018_lowl.EE and planck_2018_low.TT with native versions, and using GitHub-hosted clik version.
+- Updated planck likelihoods to all load calibration parameter from same yaml
+- Removed clik version of planck 2018 CamSpec, defaults to native (avoids inconsistent calibration parameter naming)
+- GUI inclues latest NPIPE fully Python likelihood configuration
+
 ## 3.2.2 – 2022-11-03
 
 ### General
 
-- GUI now support PySide6
 - Deprecated `debug_file` in input, in favour of `debug: [filename]`.
 - `Prior` now has method `set_reference`, to update the reference pdf's if needed (MPI-aware).
+- Warning for stuck chains not more tolerant of many fast prior rejections
+- Environment variables supported in input .yaml files, and {YAML_ROOT} placeholder for paths.
+- Improved error messages for .yaml boolean options and install logs
+- Fixes for max_tries .inf and old version checks
+- fix for 'KeyError: _manual' bug caused by unmet requirements. #275 (thanks @HTJense)
 
 ### Cosmology
 
+- Added CAMBspec NPIPE Planck 2020 likelihood (#271) ) (thanks @earosenberg)
 - Added native version of `planck_2018_lowl.EE`.
+- Added native version of `planck_2018_low.TT`. (thanks @eirikgje)
 - Added links to external likelihoods Planck PR4 Lensing, pyWMAP.
+- GUI now support PySide6
 - Fixed bug in BAO likelihood (#250, thanks @Pablo-Lemos)
 - Added files for the BAO DR12 and DR16 LRG likelihoods (PR #235; thanks @markm42)
+- Test updates for CAMB 1.4 with updated constants, BBN model and neutrino nnu=3.044
 
 ## 3.2.1 – 2022-05-17
 
@@ -26,15 +150,6 @@
 
 - Documented uses of `Model` class in general contexts (previously only cosmo)
 - `Model` methods to compute log-probabilities and derived parameters now have an `as_dict` keyword (default `False`), for more informative return value.
-- Added `--minimize` flag to `cobaya-run` for quick minimization (replaces sampler, uses previous output).
-- Add `COBAYA_USE_FILE_LOCKING` environment variable to allow disabling of file locks. Warning not to use `--test` with MPI.
-- Installation of external packages is now version-aware for some packages; added `--upgrade` option to `cobaya-install`, off by default to preserve possible user changes.
-- Introduced `cobaya.component.ComponentNotFoundError` to handle cases in which internal or external components cannot be found.
-- In Linux terminals, added `COBAYA_COLOR` environment variable to get colourful output, useful e.g. for debugging, but *not* recommended for output to a file (e.g. running in a cluster).
-
-### PolyChord
-
-- Updated to v1.20.1: adds `nfail` to control failed initialisation, `synchronous` to choose sync/async parallelisation, variable number of live points, and the possibility to use an internal maximiser. Merges #232 (thanks @williamjameshandley).
 
 ### Cosmological likelihoods and theory codes
 
