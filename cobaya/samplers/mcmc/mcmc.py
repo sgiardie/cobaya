@@ -24,6 +24,7 @@ from cobaya.typing import empty_dict
 from cobaya.samplers.mcmc.proposal import BlockedProposer
 from cobaya.log import LoggedError, always_stop_exceptions
 from cobaya.tools import get_external_function, NumberWithUnits, load_DataFrame
+from cobaya.functions import inverse_cholesky
 from cobaya.yaml import yaml_dump_file
 from cobaya.model import LogPosterior
 from cobaya import mpi
@@ -174,8 +175,8 @@ class MCMC(CovmatSampler):
         # If resuming but no existing chains, assume failed run and ignore blocking
         # if speeds measurement requested
         if (
-            self.output.is_resuming() and not existing_chains_any_process and
-            self.measure_speeds
+                self.output.is_resuming() and not existing_chains_any_process and
+                self.measure_speeds
         ):
             self.blocking = None
         if self.measure_speeds and self.blocking:
@@ -254,7 +255,7 @@ class MCMC(CovmatSampler):
         """Number of parameters which are considered fast, in binary fast/slow splits."""
         return len(self.fast_params)
 
-    def get_acceptance_rate(self, first=0, last=None):
+    def get_acceptance_rate(self, first=0, last=None) -> np.floating:
         """
         Computes the current acceptance rate, optionally only for ``[first:last]``
         subchain.
@@ -697,13 +698,14 @@ class MCMC(CovmatSampler):
             acceptance_rate = (np.average(acceptance_rates, weights=Ns)
                                if acceptance_rates is not None else acceptance_rate)
             if self.oversample_thin > 1:
-                weights_multi_str = (" = 1/avg(%r)" % list(acceptance_rates)
+                weights_multi_str = (" = 1/avg(%r)" % acceptance_rates.tolist()
                                      if acceptance_rates is not None else "")
                 self.log.info(" - Average thinned weight: %.3f%s", 1 / acceptance_rate,
                               weights_multi_str)
             else:
-                accpt_multi_str = (" = avg(%r)" % list(acceptance_rates)
-                                   if acceptance_rates is not None else "")
+                accpt_multi_str = (
+                    " = avg([%s])" % ", ".join("%.4f" % x for x in acceptance_rates)
+                    if acceptance_rates is not None else "")
                 self.log.info(" - Acceptance rate: %.3f%s", acceptance_rate,
                               accpt_multi_str)
             self.progress.at[self.i_learn, "acceptance_rate"] = acceptance_rate
@@ -724,7 +726,7 @@ class MCMC(CovmatSampler):
             converged_means = False
             # Cholesky of (normalized) mean of covs and eigvals of Linv*cov_of_means*L
             try:
-                L = np.linalg.cholesky(norm_mean_of_covs)
+                Linv = inverse_cholesky(norm_mean_of_covs)
             except np.linalg.LinAlgError:
                 self.log.warning(
                     "Negative covariance eigenvectors. "
@@ -732,7 +734,6 @@ class MCMC(CovmatSampler):
                     "contain enough information at this point. "
                     "Skipping learning a new covmat for now.")
             else:
-                Linv = np.linalg.inv(L)
                 try:
                     eigvals = np.linalg.eigvalsh(Linv.dot(corr_of_means).dot(Linv.T))
                     success_means = True
@@ -746,8 +747,8 @@ class MCMC(CovmatSampler):
                     condition_number = Rminus1 / min(np.abs(eigvals))
                     self.log.debug(" - Condition number = %g", condition_number)
                     self.log.debug(" - Eigenvalues = %r", eigvals)
-                    accpt_multi_str = \
-                        " = sum(%r)" % list(Ns) if more_than_one_process() else ""
+                    accpt_multi_str = " = sum(%r)" % Ns.astype(int).tolist() \
+                        if more_than_one_process() else ""
                     self.log.info(
                         " - Convergence of means: R-1 = %f after %d accepted steps%s",
                         Rminus1, sum(Ns), accpt_multi_str)
@@ -813,8 +814,8 @@ class MCMC(CovmatSampler):
                     self.log.debug(" - normalized std's of bounds = %r", Rminus1_cl)
                     Rminus1_cl = np.max(Rminus1_cl)
                     self.progress.at[self.i_learn, "Rminus1_cl"] = Rminus1_cl
-                    accpt_multi_str = \
-                        " = sum(%r)" % list(Ns) if more_than_one_process() else ""
+                    accpt_multi_str = " = sum(%r)" % Ns.astype(int).tolist() \
+                        if more_than_one_process() else ""
                     self.log.info(
                         " - Convergence of bounds: R-1 = %f after %d accepted steps%s",
                         Rminus1_cl,

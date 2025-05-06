@@ -1,4 +1,59 @@
-## 3.5.1
+
+## 3.5.7 - 2025-03-31
+
+### General
+
+- Fixed issue with changing parameter order using gaussian_mixture with input_params
+- cobaya-doc can be used to list components of a given type, e.g. `cobaya-doc bao`
+- Small tidies for float output with numpy2
+
+### Cosmology
+
+- BAO, DESI, and SN likelihood docs now automatically list all available internal likelihoods
+
+## 3.5.6 - 2025-03-21
+
+### Cosmology
+- Added DESI DR2 bao likelihoods (thanks @desihub)
+- ACT DR6 added to list of external likelihoods (thanks @ACTCollaboration)
+
+## 3.5.5 – 2025-02-05
+
+### General
+
+- Option for stricter run-time input type checking (#388, thanks @ggalloni)
+- Detect and fix incomplete last lines when resuming or minimizing from existing runs (#306, #378)
+- Added functions module and refactored some numerical functions into it
+- Tidier numpy2 outputs
+- Other minor fixes (thanks @mgerbino, @ark93-cosmo, @MariaLuisaGallavotti, @ewanchamberlain)
+
+### Cosmology
+
+#### CLASS
+
+- Regression: no multiple local installs after v3.3 (see #404)
+
+## 3.5.4 – 2024-08-14
+
+- Allow classes to have both yaml and class attributes as long as no duplicate keys
+- Added get_modified_defaults() class method to cobaya components to dynamically set/modify defaults
+
+### Cosmology
+- Option to return lensed scalar Cl's from CAMB (without tensors) (thanks @kimmywu})
+
+## 3.5.3 – 2024-08-09
+
+- added --allow-changes option to cobaya-run to allow changes in the input file when resuming or minimizing
+- Updates for deprecation warnings
+- Minor optimization refactor and doc update
+
+## 3.5.2 – 2024-08-09
+
+- Updates for numpy 2 and other compatibility fixes
+- Fixes #357, #358, #360, #361, #362, #368
+- Added _fast_chi_squared method to base class InstallableLikelihood
+
+## 3.5.1 – 2024-04-25
 
 ### General
 
@@ -266,9 +321,9 @@
 - Added new fast but more realistic running, resuming and post tests with and without mpi
 - Fixed some randomized test inputs for more reliable running
 - drag: True running test
-- Coverage reporting added to Travis
+- Coverage reporting added
 - More useful traceback and console log when error raised running pytest
-- added COBAYA_DEBUG env variable that can be set to force debug output (e.g. set in travis for failed build rerun)
+- added COBAYA_DEBUG env variable that can be set to force debug output (e.g. set in tests for failed build rerun)
 
 ## 3.0.4 – 2021-03-10
 

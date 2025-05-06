@@ -19,8 +19,7 @@ from collections import defaultdict
 
 # Local
 from cobaya.conventions import products_path, kinds, separator_files, \
-    get_chi2_name, get_chi2_label, Extension, FileSuffix, \
-    packages_path_input
+    get_chi2_name, get_chi2_label, Extension, FileSuffix, packages_path_input
 from cobaya.typing import InputDict, InfoDict, ModelDict, ExpandedParamsDict, LikesDict, \
     empty_dict
 from cobaya.tools import recursive_update, str_to_list, get_base_classes, \
@@ -30,6 +29,7 @@ from cobaya.yaml import yaml_load_file, yaml_load
 from cobaya.log import LoggedError, get_logger
 from cobaya.parameterization import expand_info_param
 from cobaya import mpi
+import cobaya.typing
 
 # Logger
 logger = get_logger(__name__)
@@ -142,6 +142,8 @@ def load_info_overrides(*infos_or_yaml_or_files, **flags) -> InputDict:
     for flag, value in flags.items():
         if value is not None:
             info[flag] = value
+    if cobaya.typing.enforce_type_checking:
+        cobaya.typing.validate_type(InputDict, info)
     return info
 
 
@@ -241,6 +243,9 @@ def get_default_info(component_or_class, kind=None, return_yaml=False,
             cls.get_defaults(return_yaml=return_yaml,
                              yaml_expand_defaults=yaml_expand_defaults,
                              input_options=input_options)
+        if not return_yaml:
+            default_component_info = cls.get_modified_defaults(
+                default_component_info, input_options=input_options)
     except ComponentNotFoundError:
         raise
     except Exception as e:

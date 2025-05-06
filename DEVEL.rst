@@ -10,7 +10,7 @@ This document gathers some notes about the development flow, release checklist, 
 ``git`` development model
 -------------------------
 
-* Non-breaking travis-passing latest changes and fixes are in master
+* Non-breaking test-passing latest changes and fixes are in master
 * Development that may break tests is done in temp branches or forks and merged to master once OK
 * Breaking changes developed in separate branches, and merged when releases updated
 * Releases are branched out, and only critical bug fixes are pushed onto them.
@@ -21,7 +21,7 @@ Development flow for contributors
 1. Fork and clone the repo from github.
 2. From its folder, install in editable mode: ``pip install -e .``
 3. Modify stuff.
-4. Test with pytest (first "pip install pytest pytest-forked pytest-cov flaky dill")
+4. Test with pytest (first "pip install pytest pytest-xdist pytest-cov flaky dill")
 5. Make a pull requests and check (about about 15 minutes) if the tests have passed.
 6. Iterate until tests pass, then wait for or request feedback/merge
 
@@ -45,7 +45,7 @@ can check most formatting and static errors on the command line using::
 Release checklist
 -----------------
 
-+ Make sure all tests pass in Travis (or the package won't be pushed to PyPI).
++ Make sure all tests pass on GitHub Actions (or the package won't be pushed to PyPI).
 + Make sure everything relevant has been added to the Changelog.
 + Delete old deprecation notices (>=2 versions before)
 + Bump version number in ``__init__.py`` and ``CHANGELOG.md`` (also date)
@@ -55,6 +55,7 @@ Release checklist
 + Update year of copyright in ``__init__.py``.
 + Update year of copyright in ``LICENCE.txt``.
 + Commit + tag with new version + ``git push`` + ``git push --tags``
++ Create a release in GitHub from the tag, with the Changelog as description
 + If needed, re-build the documentation.
 + If applicable, delete branches merged for this version.
 + Notify via the e-mail list.
