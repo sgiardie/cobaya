@@ -5,15 +5,16 @@ import inspect
 from inspect import cleandoc
 from packaging import version
 from importlib import import_module, resources
-from typing import Optional, Union, List, Set
+from typing import Optional, Union, List, Set, get_type_hints
 
 from cobaya.log import HasLogger, LoggedError, get_logger
-from cobaya.typing import Any, InfoDict, InfoDictIn, empty_dict
+from cobaya.typing import Any, InfoDict, InfoDictIn, empty_dict, validate_type
 from cobaya.tools import resolve_packages_path, load_module, get_base_classes, \
     get_internal_class_component_name, deepcopy_where_possible, VersionCheckError
 from cobaya.conventions import kinds, cobaya_package, reserved_attributes
-from cobaya.yaml import yaml_load_file, yaml_dump
+from cobaya.yaml import yaml_load_file, yaml_dump, yaml_load
 from cobaya.mpi import is_main_process
+import cobaya
 
 
 class Timer:
@@ -167,8 +168,7 @@ class HasDefaults:
         from this class, it will return the result from an inherited class if that
         provides bibtex.
         """
-        filename = cls.__dict__.get('bibtex_file')
-        if filename:
+        if filename := cls.__dict__.get('bibtex_file'):
             bib = cls.get_text_file_content(filename)
         else:
             bib = cls.get_associated_file_content('.bibtex')
@@ -271,12 +271,16 @@ class HasDefaults:
         yaml_text = cls.get_associated_file_content('.yaml')
         options = cls.get_class_options(input_options=input_options)
         if options and yaml_text:
-            log = get_logger(cls.get_qualified_class_name())
-            raise LoggedError(log,
-                              "%s: any class can either have .yaml or class variables "
-                              "but not both (type declarations without values are fine "
-                              "also with yaml file). You have class attributes: %s",
-                              cls.get_qualified_class_name(), list(options))
+            yaml_options = yaml_load(yaml_text)
+            if both := set(yaml_options).intersection(options):
+                raise LoggedError(get_logger(cls.get_qualified_class_name()),
+                                  "%s: class has .yaml and class variables/options "
+                                  "that define the same keys: %s \n"
+                                  "(type declarations without values are fine "
+                                  "with yaml file as well).",
+                                  cls.get_qualified_class_name(), list(both))
+            options.update(yaml_options)
+            yaml_text = None
         if return_yaml and not yaml_expand_defaults:
             return yaml_text or ""
         this_defaults = yaml_load_file(cls.get_yaml_file(), yaml_text) \
@@ -294,6 +298,17 @@ class HasDefaults:
         else:
             return defaults
 
+    # noinspection PyUnusedLocal
+    @classmethod
+    def get_modified_defaults(cls, defaults, input_options=empty_dict):
+        """
+        After defaults dictionary is loaded, you can dynamically modify them here
+        as needed,e.g. to add or remove defaults['params']. Use this when you don't
+        want the inheritance-recursive nature of get_defaults() or don't only
+        want to affect class attributes (like get_class_options() does0.
+        """
+        return defaults
+
     @classmethod
     def get_annotations(cls) -> InfoDict:
         d = {}
@@ -301,6 +316,7 @@ class HasDefaults:
             if issubclass(base, HasDefaults) and base is not HasDefaults:
                 d.update(base.get_annotations())
 
+            # from Python 10 should use just cls.__annotations__
             d.update({k: v for k, v in cls.__dict__.get("__annotations__", {}).items()
                       if not k.startswith('_')})
         return d
@@ -317,6 +333,8 @@ class CobayaComponent(HasLogger, HasDefaults):
     _at_resume_prefer_new: List[str] = ["version"]
     _at_resume_prefer_old: List[str] = []
 
+    _enforce_types: bool = False
+
     def __init__(self, info: InfoDictIn = empty_dict,
                  name: Optional[str] = None,
                  timing: Optional[bool] = None,
@@ -325,6 +343,7 @@ class CobayaComponent(HasLogger, HasDefaults):
         if standalone:
             # TODO: would probably be more natural if defaults were always read here
             default_info = self.get_defaults(input_options=info)
+            default_info = self.get_modified_defaults(default_info, input_options=info)
             default_info.update(info)
             info = default_info
 
@@ -340,6 +359,8 @@ class CobayaComponent(HasLogger, HasDefaults):
             except AttributeError:
                 raise AttributeError("Cannot set {} attribute for {}!".format(k, self))
         self.set_logger(name=self._name)
+        self.validate_attributes(annotations)
+
         self.set_timing_on(timing)
         try:
             if initialize:
@@ -397,21 +418,35 @@ class CobayaComponent(HasLogger, HasDefaults):
         """
         return True
 
-    def validate_info(self, k: str, value: Any, annotations: dict):
+    def validate_info(self, name: str, value: Any, annotations: dict):
         """
         Does any validation on parameter k read from an input dictionary or yaml file,
         before setting the corresponding class attribute.
-        You could enforce consistency with annotations here, but does not by default.
+        This check is always done, even if _enforce_types is not set.
 
-        :param k: name of parameter
+        :param name: name of parameter
         :param value: value
         :param annotations: resolved inherited dictionary of attributes for this class
         """
 
-        # by default just test booleans, e.g. for typos of "false" which evaluate true
-        if annotations.get(k) is bool and value and isinstance(value, str):
+        if annotations.get(name) is bool and value and isinstance(value, str):
             raise AttributeError("Class '%s' parameter '%s' should be True "
-                                 "or False, got '%s'" % (self, k, value))
+                                 "or False, got '%s'" % (self, name, value))
+
+    def validate_attributes(self, annotations: dict):
+        """
+        If _enforce_types or cobaya.typing.enforce_type_checking is set, this
+        checks all class attributes against the annotation types
+
+        :param annotations: resolved inherited dictionary of attributes for this class
+        :raises: TypeError if any attribute does not match the annotation type
+        """
+        check = cobaya.typing.enforce_type_checking
+        if check or self._enforce_types and check is not False:
+            hints = get_type_hints(self.__class__)  # resolve any deferred attributes
+            for name in annotations:
+                validate_type(hints[name], getattr(self, name, None),
+                              self.get_name() + ':' + name)
 
     @classmethod
     def get_kind(cls):
@@ -429,9 +464,7 @@ class CobayaComponent(HasLogger, HasDefaults):
         :return: bool
         """
         va, vb = version.parse(version_a), version.parse(version_b)
-        if va >= vb if equal else va > vb:
-            return True
-        return False
+        return va >= vb if equal else va > vb
 
     def __exit__(self, exception_type, exception_value, traceback):
         if self.timer and self.timer.n:
@@ -455,8 +488,7 @@ class ComponentCollection(dict, HasLogger):
         self[name] = component
 
     def dump_timing(self):
-        timers = [component for component in self.values() if component.timer]
-        if timers:
+        if timers := [component for component in self.values() if component.timer]:
             sep = "\n   "
             self.log.info(
                 "Average computation time:" + sep + sep.join(
@@ -468,6 +500,7 @@ class ComponentCollection(dict, HasLogger):
     def get_versions(self, add_version_field=False) -> InfoDict:
         """
         Get version dictionary
+
         :return: dictionary of versions for all components
         """
 
@@ -480,6 +513,7 @@ class ComponentCollection(dict, HasLogger):
     def get_speeds(self, ignore_sub=False) -> InfoDict:
         """
         Get speeds dictionary
+
         :return: dictionary of versions for all components
         """
         from cobaya.theory import HelperTheory
@@ -681,8 +715,7 @@ def module_class_for_name(m, name):
     for cls in classes_in_module(m, subclass_of=CobayaComponent):
         if cls.__name__.lower() in valid_names:
             if result is not None:
-                raise ValueError('More than one class with same lowercase name %s',
-                                 name)
+                raise ValueError(f'More than one class with same lowercase name {name}')
             result = cls
     return result
 
@@ -714,8 +747,7 @@ def _bare_load_external_module(name, path=None, min_version=None, reload=False,
     Loads an external module ``name``.
 
     If a ``path`` is given, it looks for an installation there and fails if it does
-    not find one. If ``path`` is not given, tries a global
-    ``import``.
+    not find one. If ``path`` is not given, tries a global ``import``.
 
     Raises :class:`component.ComponetNotInstalledError` if the module could not be
     imported.
@@ -763,7 +795,7 @@ def _bare_load_external_module(name, path=None, min_version=None, reload=False,
 
 def load_external_module(module_name=None, path=None, install_path=None, min_version=None,
                          get_import_path=None, reload=False, logger=None,
-                         not_installed_level=None):
+                         not_installed_level=None, default_global=False):
     """
     Tries to load an external module at initialisation, dealing with explicit paths
     and Cobaya's installation path.
@@ -793,12 +825,14 @@ def load_external_module(module_name=None, path=None, install_path=None, min_ver
     found. If this exception will be handled at a higher level, you may pass
     `not_installed_level='debug'` to prevent printing non-important messages at
     error-level logging.
+
+    If default_global=True, always attempts to load from the global path if not
+    installed at path (e.g. pip install).
     """
     if not logger:
         logger = get_logger(__name__)
     load_kwargs = {"name": module_name, "path": path, "get_import_path": get_import_path,
                    "min_version": min_version, "reload": reload, "logger": logger}
-    default_global = False
     if isinstance(path, str):
         if path.lower() == "global":
             msg_tried = "global import (`path='global'` given)"

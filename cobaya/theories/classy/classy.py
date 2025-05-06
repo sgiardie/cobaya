@@ -263,7 +263,7 @@ class classy(BoltzmannBase):
     _classy_repo_name = "lesgourg/class_public"
     _min_classy_version = "v3.2.1"
     _classy_min_gcc_version = "6.4"  # Lower ones are possible atm, but leak memory!
-    _classy_repo_version = os.environ.get('CLASSY_REPO_VERSION', _min_classy_version)
+    _classy_repo_version = os.environ.get('CLASSY_REPO_VERSION', "master")
 
     classy_module: Any
     ignore_obsolete: bool
@@ -273,17 +273,32 @@ class classy(BoltzmannBase):
         install_path = None
         if self.packages_path is not None:
             install_path = self.get_path(self.packages_path)
-        min_version = None if self.ignore_obsolete else self._classy_repo_version
+        min_version = None if self.ignore_obsolete else self._min_classy_version
         try:
-            self.classy_module = load_external_module(
-                "classy", path=self.path, install_path=install_path,
-                min_version=min_version, get_import_path=self.get_import_path,
-                logger=self.log, not_installed_level="debug")
+            try:
+                self.classy_module = load_external_module(
+                    "classy", path=self.path, install_path=install_path,
+                    min_version=min_version, get_import_path=self.get_import_path,
+                    logger=self.log, not_installed_level="debug")
+            # Regression introduced by CLASS v3.3 -- Deprecate CLASS <v3.3 eventually
+            except (VersionCheckError, ComponentNotInstalledError) as ni_internal_excpt:
+                try:
+                    self.classy_module = load_external_module(
+                        "classy", path=self.path, install_path=install_path,
+                        min_version=min_version, get_import_path=self.get_import_path_old,
+                        logger=self.log, not_installed_level="debug")
+                    # Only runs if passed:
+                    self.log.warning(
+                        "Detected an old CLASS version (<3.3). "
+                        "Please update: support for this will be deprecated soon."
+                    )
+                except ComponentNotInstalledError:
+                    raise ni_internal_excpt
         except VersionCheckError as vc_excpt:
             raise VersionCheckError(
                 str(vc_excpt) + " If you are using CLASS unmodified, upgrade with"
-                "`cobaya-install classy --upgrade`. If you are using a modified CLASS, "
-                "set the option `ignore_obsolete: True` for CLASS.") from vc_excpt
+                                "`cobaya-install classy --upgrade`. If you are using a modified CLASS, "
+                                "set the option `ignore_obsolete: True` for CLASS.") from vc_excpt
         except ComponentNotInstalledError as ni_excpt:
             raise ComponentNotInstalledError(
                 self.log, (f"Could not find CLASS: {ni_excpt}. "
@@ -449,7 +464,7 @@ class classy(BoltzmannBase):
                           max(cls[cl] for cl in cls if "b" in cl.lower()) > 50)
         has_lensing = any(("p" in cl.lower()) for cl in cls)
         if (has_BB_l_gt_50 or has_lensing) and \
-           self.extra_args.get("non_linear") == non_linear_null_value:
+                self.extra_args.get("non_linear") == non_linear_null_value:
             self.log.warning("Requesting BB for ell>50 or lensing Cl's: "
                              "using a non-linear code is recommended (and you are not "
                              "using any). To activate it, set "
@@ -531,7 +546,7 @@ class classy(BoltzmannBase):
         args = {self.translate_param(p): v for p, v in params_values_dict.items()}
         args.update(self.extra_args)
         # Generate and save
-        self.log.debug("Setting parameters: %r", args)
+        self.param_dict_debug("Setting parameters: %r", args)
         self.classy.set(**args)
 
     def calculate(self, state, want_derived=True, **params_values_dict):
@@ -683,7 +698,7 @@ class classy(BoltzmannBase):
             if cl == "ell":
                 continue
             units_power = float(sum(cl.count(p) for p in ["t", "e", "b"]))
-            cls[cl][2:] *= units_factor**units_power
+            cls[cl][2:] *= units_factor ** units_power
             if ell_factor:
                 if "p" not in cl:
                     cls[cl][2:] *= ells_factor
@@ -748,6 +763,10 @@ class classy(BoltzmannBase):
 
     @staticmethod
     def get_import_path(path):
+        return get_compiled_import_path(path)
+
+    @staticmethod
+    def get_import_path_old(path):
         return get_compiled_import_path(os.path.join(path, "python"))
 
     @classmethod
@@ -763,10 +782,24 @@ class classy(BoltzmannBase):
         try:
             return bool(load_external_module(
                 "classy", path=kwargs["path"], get_import_path=cls.get_import_path,
-                min_version=cls._classy_repo_version, reload=reload,
+                min_version=cls._min_classy_version, reload=reload,
                 logger=get_logger(cls.__name__), not_installed_level="debug"))
+        # Regression introduced by CLASS v3.3 -- Deprecate CLASS <v3.3 eventually
         except ComponentNotInstalledError:
-            return False
+            try:
+                success = bool(load_external_module(
+                    "classy", path=kwargs["path"],
+                    get_import_path=cls.get_import_path_old,
+                    min_version=cls._min_classy_version, reload=reload,
+                    logger=get_logger(cls.__name__), not_installed_level="debug"))
+                # Only runs if passed:
+                get_logger(cls.__name__).warning(
+                    "Detected an old CLASS version (<3.3). "
+                    "Please update: support for this will be deprecated soon."
+                )
+                return success
+            except ComponentNotInstalledError:
+                return False
 
     @classmethod
     def install(cls, path=None, code=True, no_progress_bars=False, **_kwargs):
@@ -775,8 +808,6 @@ class classy(BoltzmannBase):
             log.info("Code not requested. Nothing to do.")
             return True
         log.info("Installing pre-requisites...")
-        # TODO: remove version restriction below when this issue is fixed:
-        # https://github.com/lesgourg/class_public/issues/531
         exit_status = pip_install("cython")
         if exit_status:
             log.error("Could not install pre-requisite: cython")
@@ -807,8 +838,8 @@ class classy(BoltzmannBase):
         process_make = Popen(["make"], cwd=classy_path, stdout=PIPE, stderr=PIPE, env=env)
         out, err = process_make.communicate()
         if process_make.returncode:
-            log.info(out)
-            log.info(err)
+            log.info(out.decode("utf-8"))
+            log.info(err.decode("utf-8"))
             log.error("Compilation failed!")
             return False
         return True

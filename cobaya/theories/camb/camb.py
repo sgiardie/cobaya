@@ -222,7 +222,7 @@ from itertools import chain
 from cobaya.component import ComponentNotInstalledError, load_external_module
 from cobaya.theories.cosmo import BoltzmannBase
 from cobaya.log import LoggedError, get_logger
-from cobaya.install import download_github_release, check_gcc_version
+from cobaya.install import download_github_release, check_gcc_version, pip_install
 from cobaya.tools import getfullargspec, get_class_methods, get_properties, \
     check_module_version, str_to_list, Pool1D, Pool2D, PoolND, VersionCheckError
 from cobaya.theory import HelperTheory
@@ -263,7 +263,8 @@ class CAMB(BoltzmannBase):
     def initialize(self):
         """Importing CAMB from the correct path, if given."""
         try:
-            install_path = (lambda p: self.get_path(p) if p else None)(self.packages_path)
+            install_path = self.get_path(self.packages_path) \
+                if self.packages_path else None
             min_version = None if self.ignore_obsolete else self._min_camb_version
             self.camb = load_external_module(
                 "camb", path=self.path, install_path=install_path,
@@ -272,7 +273,8 @@ class CAMB(BoltzmannBase):
         except VersionCheckError as excpt:
             raise VersionCheckError(
                 str(excpt) + " If you are using CAMB unmodified, upgrade with"
-                             "`cobaya-install camb --upgrade`. If you are using a modified CAMB, "
+                             "`cobaya-install camb --upgrade`. "
+                             "If you are using a modified CAMB, "
                              "set the option `ignore_obsolete: True` for CAMB.")
         except ComponentNotInstalledError as excpt:
             raise ComponentNotInstalledError(
@@ -396,10 +398,11 @@ class CAMB(BoltzmannBase):
 
         for k, v in self._must_provide.items():
             # Products and other computations
-            if k == "Cl":
+            if k == "Cl" or k == "lensed_scal_Cl":
                 self.set_cl_reqs(v)
                 cls = [a.lower() for a in v]
                 needs_lensing = set(cls).intersection({"pp", "pt", "pe", "tp", "ep"})
+                camb_result_key = "total" if k == "Cl" else "lensed_scalar"
                 self.collectors[k] = Collector(
                     method=CAMBdata.get_cmb_power_spectra,
                     kwargs={
@@ -699,15 +702,21 @@ class CAMB(BoltzmannBase):
                                             " in the CAMB interface", p)
         return derived
 
-    def _get_Cl(self, ell_factor=False, units="FIRASmuK2", lensed=True):
-        which_key = "Cl" if lensed else "unlensed_Cl"
-        which_result = "total" if lensed else "unlensed_total"
-        which_error = "lensed" if lensed else "unlensed"
+    def _get_Cl(self, ell_factor=False, units="FIRASmuK2", lensed=True,
+                scalar_only=False):
+        if scalar_only:
+            assert lensed, "Only Implemented for lensed"
+            which_key = "lensed_scal_Cl"
+            which_result = "lensed_scalar"
+        else:
+            which_key = "Cl" if lensed else "unlensed_Cl"
+            which_result = "total" if lensed else "unlensed_total"
         try:
             cl_camb = self.current_state[which_key][which_result].copy()
         except:
             raise LoggedError(self.log, "No %s Cl's were computed. Are you sure that you "
-                                        "have requested them?", which_error)
+                                        "have requested them?",
+                              "lensed" if lensed else "unlensed")
         units_factor = self._cmb_unit_factor(
             units, self.current_state['derived_extra']['TCMB'])
         ls = np.arange(cl_camb.shape[0], dtype=np.int64)
@@ -743,8 +752,12 @@ class CAMB(BoltzmannBase):
     def get_unlensed_Cl(self, ell_factor=False, units="FIRASmuK2"):
         return self._get_Cl(ell_factor=ell_factor, units=units, lensed=False)
 
+    def get_lensed_scal_Cl(self, ell_factor=False, units="FIRASmuK2"):
+        return self._get_Cl(ell_factor=ell_factor, units=units, lensed=True,
+                            scalar_only=True)
+
     def _get_z_dependent(self, quantity, z, _pool=None):
-        # Partially reimplemented because of sigma8_z, etc, use different pool
+        # Partially reimplemented because of sigma8_z, etc., use different pool
         pool = None
         if quantity in ["sigma8_z", "fsigma8"]:
             pool = self.z_pool_for_perturbations
@@ -847,11 +860,11 @@ class CAMB(BoltzmannBase):
                             "Some of the attributes to be set manually were not "
                             "recognized: %s=%s", attr, value)
                 # Sources
-                if getattr(self, "sources", None):
+                if source_dict := getattr(self, "sources", None):
                     self.log.debug("Setting sources: %r", self.sources)
                     sources = self.camb.sources
                     source_windows = []
-                    for source, window in self.sources.items():
+                    for source, window in source_dict.items():
                         function = window.pop("function", None)
                         if function == "spline":
                             source_windows.append(sources.SplinedSourceWindow(**window))
@@ -867,14 +880,14 @@ class CAMB(BoltzmannBase):
                 self._base_params = params
             args.update(self._reduced_extra_args)
             return self.camb.set_params(self._base_params.copy(), **args)
-        except self.camb.baseconfig.CAMBParamRangeError:
+        except self.camb.baseconfig.CAMBParamRangeError as e:
             if self.stop_at_error:
-                raise LoggedError(self.log, "Out of bound parameters: %r",
-                                  params_values_dict)
+                raise LoggedError(self.log, "%s\nOut of bound parameters: %r",
+                                  e, params_values_dict)
             else:
-                self.log.debug("Out of bounds parameters. "
-                               "Assigning 0 likelihood and going on.")
-        except (self.camb.baseconfig.CAMBValueError, self.camb.baseconfig.CAMBError):
+                self.log.debug("%s;\n Out of bounds parameters. "
+                               "Assigning 0 likelihood and going on.", e)
+        except (self.camb.baseconfig.CAMBValueError, self.camb.baseconfig.CAMBError) as e:
             if self.stop_at_error:
                 self.log.error(
                     "Error setting parameters (see traceback below)! "
@@ -882,6 +895,8 @@ class CAMB(BoltzmannBase):
                     "To ignore this kind of error, make 'stop_at_error: False'.",
                     dict(state["params"]), dict(self.extra_args))
                 raise
+            else:
+                self.log.debug("Error setting parameters: %s", e)
         except self.camb.baseconfig.CAMBUnknownArgumentError as e:
             raise LoggedError(
                 self.log,
@@ -918,7 +933,7 @@ class CAMB(BoltzmannBase):
     def get_import_path(path):
         """
         Returns the ``camb`` module import path if there is a compiled version of CAMB in
-        the given folder. Otherwise raises ``FileNotFoundError``.
+        the given folder. Otherwise, raises ``FileNotFoundError``.
         """
         lib_fname = "cambdll.dll" if platform.system() == "Windows" else "camblib.so"
         if not os.path.isfile(os.path.realpath(os.path.join(path, "camb", lib_fname))):
@@ -944,6 +959,11 @@ class CAMB(BoltzmannBase):
         if not code:
             log.info("Code not requested. Nothing to do.")
             return True
+        log.info("Installing pre-requisites...")
+        exit_status = pip_install("wheel")
+        if exit_status:
+            log.error("Could not install pre-requisite: wheel")
+            return False
         log.info("Downloading camb...")
         success = download_github_release(
             os.path.join(path, "code"), cls._camb_repo_name, cls._camb_repo_version,
@@ -958,8 +978,8 @@ class CAMB(BoltzmannBase):
                              cwd=camb_path, stdout=PIPE, stderr=PIPE)
         out, err = process_make.communicate()
         if process_make.returncode:
-            log.info(out.decode())
-            log.info(err.decode())
+            log.info(out.decode("utf-8"))
+            log.info(err.decode("utf-8"))
             gcc_check = check_gcc_version(cls._camb_min_gcc_version, error_returns=False)
             if not gcc_check:
                 cause = (" Possible cause: it looks like `gcc` does not have the correct "
@@ -1004,8 +1024,7 @@ class CambTransfers(HelperTheory):
 
     def must_provide(self, **requirements):
         super().must_provide(**requirements)
-        opts = requirements.get('CAMB_transfers')
-        if opts:
+        if opts := requirements.get('CAMB_transfers'):
             self.non_linear_sources = opts['non_linear']
             self.needs_perts = opts['needs_perts']
         self.cobaya_camb.check_no_repeated_input_extra()

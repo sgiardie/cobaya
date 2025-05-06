@@ -403,6 +403,7 @@ cmb_precision["camb"] = {"lens_potential_accuracy": 1}
 planck_lss_precision = deepcopy(base_precision)
 planck_lss_precision["camb"] = {"halofit_version": "mead",
                                 "bbn_predictor": "PArthENoPE_880.2_standard.dat"}
+planck_lss_precision["classy"] = {"nonlinear_min_k_max": 25}
 
 planck_precision = deepcopy(planck_lss_precision)
 planck_precision["camb"]["lens_potential_accuracy"] = 1
@@ -415,8 +416,8 @@ cmb_sampler_mcmc: InfoDict = {"mcmc": dict(drag=False, **default_mcmc_options)}
 
 like_cmb: InfoDict = {
     none: {},
-    "planck_NPIPE": {
-        "desc": "Planck NPIPE (native; polarized NPIPE CMB + lensing)",
+    "planck_NPIPE_CamSpec": {
+        "desc": "Planck NPIPE CamSpec (native; polarized NPIPE CMB + lensing)",
         "sampler": cmb_sampler_recommended,
         "theory": {theo: {"extra_args": cmb_precision[theo]}
                    for theo in ["camb", "classy"]},
@@ -424,6 +425,22 @@ like_cmb: InfoDict = {
             "planck_2018_lowl.TT": None,
             "planck_2018_lowl.EE": None,
             "planck_NPIPE_highl_CamSpec.TTTEEE": None,
+            "planckpr4lensing":
+                {'package_install': {'github_repository': 'carronj/planck_PR4_lensing',
+                                     'min_version': '1.0.2'}}}},
+    "planck_NPIPE_Hillipop": {
+        "desc": "Planck NPIPE Hillipop+Lollipop (polarized NPIPE CMB + lensing)",
+        "sampler": cmb_sampler_recommended,
+        "theory": {theo: {"extra_args": cmb_precision[theo]}
+                   for theo in ["camb", "classy"]},
+        "likelihood": {
+            "planck_2018_lowl.TT": None,
+            "planck_2020_lollipop.lowlE":
+                {'package_install': {'pip': 'planck-npipe/lollipop',
+                                     'min_version': '4.1.1'}},
+            "planck_2020_hillipop.TTTEEE":
+                {'package_install': {'pip': 'planck-npipe/hillipop',
+                                     'min_version': '4.2.2'}},
             "planckpr4lensing":
                 {'package_install': {'github_repository': 'carronj/planck_PR4_lensing',
                                      'min_version': '1.0.2'}}}},
@@ -494,6 +511,11 @@ for name, m in like_cmb.items():
 #    "thetarseq":   {"latex": r"100\theta_\mathrm{s,eq}"},
 
 like_bao = {none: {},
+            'BAO_desi_dr2': {
+                'desc': 'Combined BAO from DESI DR2',
+                'theory': theory,
+                'likelihood': {'bao.desi_dr2': None}
+            },
             'BAO_desi_2024': {
                 'desc': 'Combined BAO from DESI 2024',
                 'theory': theory,
@@ -610,10 +632,22 @@ default_sampler = {"sampler": "MCMC dragging"}
 preset: InfoDict = dict([
     (none, {"desc": "(No preset chosen)"}),
     # Pure CMB #######################################################
-    ("planck_NPIPE_camb", {
-        "desc": "Planck NPIPE with CAMB (all native Python)",
+    ("planck_NPIPE_CamSpec_camb", {
+        "desc": "Planck NPIPE CamSpec with CAMB (all native Python)",
         "theory": "camb",
-        "like_cmb": "planck_NPIPE"}),
+        "like_cmb": "planck_NPIPE_CamSpec"}),
+    ("planck_NPIPE_CamSpec_classy", {
+        "desc": "Planck NPIPE CamSpec with CLASS (all native Python)",
+        "theory": "classy",
+        "like_cmb": "planck_NPIPE_CamSpec"}),
+    ("planck_NPIPE_Hillipop_camb", {
+        "desc": "Planck NPIPE Hillipop+Lollipop with CAMB (all native Python)",
+        "theory": "camb",
+        "like_cmb": "planck_NPIPE_Hillipop"}),
+    ("planck_NPIPE_Hillipop_classy", {
+        "desc": "Planck NPIPE Hillipop+Lollipop with CLASS (all native Python)",
+        "theory": "classy",
+        "like_cmb": "planck_NPIPE_Hillipop"}),
     ("planck_2018_camb", {
         "desc": "Planck 2018 with CAMB",
         "theory": "camb",
@@ -741,7 +775,7 @@ for name, pre in preset.items():
 # BASIC INSTALLATION #####################################################################
 install_basic: InfoDict = {
     "theory": theory,
-    "likelihood": dict(like_cmb["planck_NPIPE"]["likelihood"], **{
+    "likelihood": dict(like_cmb["planck_NPIPE_CamSpec"]["likelihood"], **{
         # 2018 lensing ensured covmat database also installed
         "planck_2018_lensing.native": None,
         "sn.pantheon": None,

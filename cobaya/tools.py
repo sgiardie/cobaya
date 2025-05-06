@@ -226,13 +226,22 @@ def get_compiled_import_path(source_path):
     return os.path.join(build_path, post)
 
 
-def import_all_classes(path, pkg, subclass_of, hidden=False, helpers=False):
+def import_all_classes(path, pkg: str, subclass_of: type, hidden=False, helpers=False,
+                       stem: str = None):
     import pkgutil
     from cobaya.theory import HelperTheory
     result = set()
-    for (module_loader, name, ispkg) in pkgutil.iter_modules([path]):
+    if stem:
+        stem_root, stem_rest = stem.split(".", 1) if "." in stem else (stem, "")
+        stem_module = pkg + '.' + stem_root
+    else:
+        stem_module = ''
+        stem_rest = None
+    for (module_loader, name, is_pkg) in pkgutil.iter_modules([path]):
         if hidden or not name.startswith('_'):
             module_name = pkg + '.' + name
+            if stem and module_name != stem_module:
+                continue
             m = load_module(module_name)
             if hidden or not getattr(m, '_is_abstract', False):
                 for class_name, cls in inspect.getmembers(m, inspect.isclass):
@@ -241,13 +250,15 @@ def import_all_classes(path, pkg, subclass_of, hidden=False, helpers=False):
                             cls.__module__ == module_name and \
                             (hidden or not cls.__dict__.get('_is_abstract')):
                         result.add(cls)
-                if ispkg:
+                if is_pkg:
                     result.update(import_all_classes(os.path.dirname(m.__file__),
-                                                     m.__name__, subclass_of, hidden))
+                                                     m.__name__, subclass_of,
+                                                     hidden, helpers,
+                                                     stem_rest))
     return result
 
 
-def get_available_internal_classes(kind, hidden=False):
+def get_available_internal_classes(kind, hidden=False, stem=None):
     """
     Gets all class names of a given kind.
     """
@@ -255,17 +266,18 @@ def get_available_internal_classes(kind, hidden=False):
     from cobaya.component import CobayaComponent
     path = os.path.join(os.path.dirname(__file__), subfolders[kind])
     return import_all_classes(path, 'cobaya.%s' % subfolders[kind], CobayaComponent,
-                              hidden)
+                              hidden, stem=stem)
 
 
-def get_all_available_internal_classes(hidden=False):
-    return set(chain(*(get_available_internal_classes(k, hidden) for k in kinds)))
+def get_all_available_internal_classes(hidden=False, stem=None):
+    return set(chain(*(get_available_internal_classes(k, hidden, stem) for k in kinds)))
 
 
-def get_available_internal_class_names(kind=None, hidden=False) -> Iterable[str]:
+def get_available_internal_class_names(kind=None, hidden=False,
+                                       stem=None) -> Iterable[str]:
     return sorted(set(cls.get_qualified_class_name() for cls in
-                      (get_available_internal_classes(kind, hidden) if kind
-                       else get_all_available_internal_classes(hidden))))
+                      (get_available_internal_classes(kind, hidden, stem) if kind
+                       else get_all_available_internal_classes(hidden, stem))))
 
 
 def replace_optimizations(function_string: str) -> str:
@@ -306,7 +318,6 @@ def get_external_function(string_or_function, name=None):
     if isinstance(string_or_function, str):
         try:
             scope = globals()
-            import scipy.stats as stats  # provide default scope for eval
             scope['stats'] = stats
             scope['np'] = np
             string_or_function = replace_optimizations(string_or_function)
@@ -457,6 +468,19 @@ def read_dnumber(n: Any, dim: int):
     return NumberWithUnits(n, "d", dtype=int, scale=dim).value
 
 
+def truncate_to_end_line(file_name):
+    with open(file_name, "r+b") as inp:
+        # Find the last complete line
+        inp.seek(0, 2)  # Go to the end of the file
+        pos = inp.tell() - 1
+        while pos > 0 and inp.read(1) != b"\n":
+            pos -= 1
+            inp.seek(pos, 0)
+        if pos > 0:
+            inp.seek(pos + 1, 0)
+            inp.truncate()
+
+
 def load_DataFrame(file_name, skip=0, root_file_name=None):
     """
     Loads a `pandas.DataFrame` from a text file
@@ -493,7 +517,17 @@ def load_DataFrame(file_name, skip=0, root_file_name=None):
             inp, sep=" ", header=None, names=cols, comment="#", skipinitialspace=True,
             skiprows=skip, index_col=False)
 
-        return data
+    if not data.empty:
+        # Check if the last row contains any NaNs
+        if data.iloc[-1].isna().any():
+            log.warning("Last row of %s is incomplete or contains NaNs", file_name)
+            # If the second-to-last row exists and doesn't contain NaNs,
+            # delete the last row assuming this was due to crash on write
+            if len(data) > 1 and not data.iloc[-2].isna().any():
+                data = data.iloc[:-1]
+                log.info(f"Saving {file_name} deleting last (in)complete line")
+                truncate_to_end_line(file_name)
+    return data
 
 
 def prepare_comment(comment):
@@ -569,7 +603,7 @@ def get_scipy_1d_pdf(definition: Union[float, Sequence, Dict]
                 ) from excpt
         kwargs["loc"] = minmaxvalues["min"]
         kwargs["scale"] = minmaxvalues["max"] - minmaxvalues["min"]
-    if kwargs["scale"] < 0:
+    if kwargs.get("scale", 1) < 0:
         raise ValueError(
             "Invalid negative range or scale. "
             f"Prior definition was {definition}.")
@@ -597,24 +631,27 @@ def get_scipy_1d_pdf(definition: Union[float, Sequence, Dict]
         ) from tp_excpt
 
 
-def _fast_norm_logpdf(self, x):
+def _fast_norm_logpdf(norm_dist):
     """WARNING: logpdf(nan) = -inf"""
-    if not hasattr(self, "_cobaya_mlogscale"):
-        self._cobaya_mlogscale = -np.log(self.kwds["scale"])
-    x_ = (np.array(x) - self.kwds["loc"]) / self.kwds["scale"]
-    # noinspection PyProtectedMember
-    return self.dist._logpdf(x_) + self._cobaya_mlogscale
+    scale = norm_dist.kwds["scale"]
+    m_log_scale = -np.log(scale) - np.log(2 * np.pi) / 2
+    loc = norm_dist.kwds["loc"]
+
+    def fast_logpdf(x):
+        return m_log_scale - ((x - loc) / scale) ** 2 / 2
+
+    return fast_logpdf
 
 
 def _KL_norm(m1, S1, m2, S2):
-    """Performs the Guassian KL computation, without input testing."""
+    """Performs the Gaussian KL computation, without input testing."""
     dim = S1.shape[0]
     S2inv = np.linalg.inv(S2)
     return 0.5 * (np.trace(S2inv.dot(S1)) + (m1 - m2).dot(S2inv).dot(m1 - m2) -
-                  dim + np.log(np.linalg.det(S2) / np.linalg.det(S1)))
+                  dim + np.linalg.slogdet(S2)[1] - np.linalg.slogdet(S1)[1])
 
 
-def KL_norm(m1=None, S1=np.array([]), m2=None, S2=np.array([]), symmetric=False):
+def KL_norm(m1=None, S1=(), m2=None, S2=(), symmetric=False):
     """Kullback-Leibler divergence between 2 gaussians."""
     S1, S2 = [np.atleast_2d(S) for S in [S1, S2]]
     assert S1.shape[0], "Must give at least S1"
@@ -631,37 +668,34 @@ def KL_norm(m1=None, S1=np.array([]), m2=None, S2=np.array([]), symmetric=False)
     return _KL_norm(m1, S1, m2, S2)
 
 
-def choleskyL(M, return_scale_free=False):
+def choleskyL_corr(M):
     r"""
     Gets the Cholesky lower triangular matrix :math:`L` (defined as :math:`M=LL^T`)
-    of a given matrix ``M``.
+    for the matrix ``M``, in the form :math:`L = S L^\prime` where S is diagonal.
 
     Can be used to create an affine transformation that decorrelates a sample
-    :math:`x=\{x_i\}` as :math:`y=Lx`, where :math:`L` is extracted from the
-    covariance of the sample.
+    :math:`x=\{x_i\}` with covariance M, as :math:`x=Ly`,
+    where :math:`L` is extracted from M and y has identity covariance.
 
-    If ``return_scale_free=True`` (default: ``False``), returns a tuple of
-    a matrix :math:`S` containing the square roots of the diagonal of the input matrix
-    (the standard deviations, if a covariance is given), and the scale-free
-    :math:`L^\prime=S^{-1}L`.
+    Returns a tuple of a matrix :math:`S` containing the square roots of the diagonal
+    of the input matrix (the standard deviations, if a covariance is given),
+    and the scale-free :math:`L^\prime=S^{-1}L`.
+    (could just use Cholesky directly for proposal)
     """
     std_diag, corr = cov_to_std_and_corr(M)
-    Lprime = np.linalg.cholesky(corr)
-    if return_scale_free:
-        return std_diag, Lprime
-    else:
-        return np.linalg.inv(std_diag).dot(Lprime)
+    return np.diag(std_diag), np.linalg.cholesky(corr)
 
 
 def cov_to_std_and_corr(cov):
     """
-    Gets the standard deviations (as a diagonal matrix)
+    Gets the standard deviations (as a 1D array
     and the correlation matrix of a covariance matrix.
     """
-    std_diag = np.diag(np.sqrt(np.diag(cov)))
-    invstd_diag = np.linalg.inv(std_diag)
-    corr = invstd_diag.dot(cov).dot(invstd_diag)
-    return std_diag, corr
+    std = np.sqrt(np.diag(cov))
+    inv_std = 1 / std
+    corr = inv_std[:, np.newaxis] * cov * inv_std[np.newaxis, :]
+    np.fill_diagonal(corr, 1.0)
+    return std, corr
 
 
 def are_different_params_lists(list_A, list_B, name_A="A", name_B="B"):
@@ -970,7 +1004,7 @@ def load_config_file():
     from cobaya.yaml import yaml_load_file
     try:
         return yaml_load_file(
-            os.path.join(get_config_path(), packages_path_config_file))
+            os.path.join(get_config_path(), packages_path_config_file)) or {}
     except:
         return {}
 

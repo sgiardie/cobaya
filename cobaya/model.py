@@ -53,7 +53,7 @@ class LogPosterior:
 
     A consistency check will be performed if initialized simultaneously with
     log-posterior, log-priors and log-likelihoods, so, for faster initialisation,
-    you may prefer to pass log-priors and log-likelhoods only, and only pass all three
+    you may prefer to pass log-priors and log-likelihoods only, and only pass all three
     (so that the test is performed) only when e.g. loading from an old sample.
 
     If ``finite=True`` (default: False), it will try to represent infinities as the
@@ -342,7 +342,7 @@ class Model(HasLogger):
             return_derived: bool = True, return_output_params: bool = False,
             as_dict: bool = False, make_finite: bool = False, cached: bool = True
     ) -> Union[np.ndarray, Dict[str, float], Tuple[np.ndarray, np.ndarray],
-               Tuple[Dict[str, float], Dict[str, float]]]:
+    Tuple[Dict[str, float], Dict[str, float]]]:
         """
         Takes a dict of input parameters, computes the likelihood pipeline, and returns
         the log-likelihoods and derived parameters.
@@ -368,7 +368,7 @@ class Model(HasLogger):
         outpar_dict: ParamValuesDict = {}
         compute_success = True
         self.provider.set_current_input_params(input_params)
-        self.log.debug("Got input parameters: %r", input_params)
+        self.param_dict_debug("Got input parameters: %r", input_params)
         loglikes = np.zeros(len(self.likelihood))
         need_derived = self.requires_derived or return_derived or return_output_params
         for (component, like_index), param_dep in zip(self._component_order.items(),
@@ -391,7 +391,7 @@ class Model(HasLogger):
                     raise LoggedError(
                         self.log,
                         "Likelihood %s has not returned a valid log-likelihood, "
-                        "but %r instead.", component,
+                        "but %s instead.", component,
                         component.current_logp) from type_excpt
         if make_finite:
             loglikes = np.nan_to_num(loglikes)
@@ -413,7 +413,7 @@ class Model(HasLogger):
                                      else list(outpar_dict.values()))
                 else:  # explicitly derived, instead of output params
                     derived_dict = self.parameterization.to_derived(outpar_dict)
-                    self.log.debug("Computed derived parameters: %s", derived_dict)
+                    self.param_dict_debug("Computed derived parameters: %s", derived_dict)
                     return_params = (derived_dict if as_dict
                                      else list(derived_dict.values()))
             return return_likes, return_params
@@ -424,7 +424,7 @@ class Model(HasLogger):
                  as_dict: bool = False, make_finite: bool = False,
                  return_derived: bool = True, cached: bool = True
                  ) -> Union[np.ndarray, Dict[str, float], Tuple[np.ndarray, np.ndarray],
-                            Tuple[Dict[str, float], Dict[str, float]]]:
+    Tuple[Dict[str, float], Dict[str, float]]]:
         """
         Takes an array or dictionary of sampled parameter values.
         If the argument is an array, parameters must have the same order as in the input.
@@ -537,12 +537,12 @@ class Model(HasLogger):
                 self.log.debug(
                     "Posterior to be computed for parameters %s",
                     dict(zip(self.parameterization.sampled_params(),
-                             params_values_array)))
+                             params_values_array.astype(float))))
             if not np.all(np.isfinite(params_values_array)):
                 raise LoggedError(
                     self.log, "Got non-finite parameter values: %r",
                     dict(zip(self.parameterization.sampled_params(),
-                             params_values_array)))
+                             params_values_array.astype(float))))
         # Notice that we don't use the make_finite in the prior call,
         # to correctly check if we have to compute the likelihood
         logpriors_1d = self.prior.logps_internal(params_values_array)
@@ -591,8 +591,8 @@ class Model(HasLogger):
 
     def get_valid_point(self, max_tries: int, ignore_fixed_ref: bool = False,
                         logposterior_as_dict: bool = False, random_state=None,
-                        ) -> Union[Tuple[np.ndarray, LogPosterior],
-                                   Tuple[np.ndarray, dict]]:
+                        ) \
+            -> Union[Tuple[np.ndarray, LogPosterior], Tuple[np.ndarray, dict]]:
         """
         Finds a point with finite posterior, sampled from the reference pdf.
 
@@ -733,8 +733,8 @@ class Model(HasLogger):
         manual_theory = Theory(name='_manual')
         if manual_requirements:
             self._manual_requirements = (
-                getattr(self, "_manual_requirements", []) +
-                _tidy_requirements(manual_requirements)
+                    getattr(self, "_manual_requirements", []) +
+                    _tidy_requirements(manual_requirements)
             )
             requirements[manual_theory] = deepcopy(self._manual_requirements)
 
@@ -970,15 +970,15 @@ class Model(HasLogger):
                                     "but not provided.", p, component.get_name()
                                 ) from excpt
                 # 2. Is there a params prefix?
-                elif getattr(component, prefix, None) is not None:
+                elif (_prefix := getattr(component, prefix, None)) is not None:
                     for p in assign:
-                        if p.startswith(getattr(component, prefix)):
+                        if p.startswith(_prefix):
                             assign[p] += [component]
                 # 3. Does it have a general (mixed) list of params? (set from default)
                 # 4. or otherwise required
-                elif getattr(component, "params", None) or required_params:
-                    if getattr(component, "params", None):
-                        for p, options in getattr(component, "params", {}).items():
+                elif (_params := getattr(component, "params", {})) or required_params:
+                    if _params:
+                        for p, options in _params.items():
                             if not isinstance(options, Mapping) and not derived_param or \
                                     isinstance(options, Mapping) and \
                                     options.get('derived', False) is derived_param:
@@ -1079,16 +1079,22 @@ class Model(HasLogger):
                 "Output params can only be computed by one likelihood/theory, "
                 "but some were claimed by more than one: %r.", multi_assigned_output)
         # Finished! Assign and update infos
-        for assign, option in ((input_assign, "input_params"),
-                               (output_assign, "output_params")):
+        for assign, option, output in ((input_assign, "input_params", False),
+                                       (output_assign, "output_params", True)):
             for component in self.components:
-                setattr(component, option,
-                        [p for p, assign in assign.items() if component in assign])
+                assign_params = [p for p, assign in assign.items() if component in assign]
+                current_assign = getattr(component, option)
+                if output or current_assign is unset_params:
+                    setattr(component, option, assign_params)
+                elif set(assign_params) != set(current_assign):
+                    raise LoggedError(
+                        self.log, "exising %s %r do not match assigned parameters %r",
+                        option, assign_params, current_assign)
+
                 # Update infos! (helper theory parameters stored in yaml with host)
                 inf = (info_likelihood if component in self.likelihood.values() else
                        info_theory)
-                inf = inf.get(component.get_name())
-                if inf:
+                if inf := inf.get(component.get_name()):
                     inf.pop("params", None)
                     inf[option] = component.get_attr_list_with_helpers(option)
         if self.is_debug_and_mpi_root():
@@ -1172,8 +1178,8 @@ class Model(HasLogger):
             blocks_split = (lambda L: [list(chain(*L[:i_last_slow + 1])),
                                        list(chain(*L[i_last_slow + 1:]))])(blocks_sorted)
             footprints_split = (
-                [np.array(footprints_sorted[:i_last_slow + 1]).sum(axis=0)] +
-                [np.array(footprints_sorted[i_last_slow + 1:]).sum(axis=0)])
+                    [np.array(footprints_sorted[:i_last_slow + 1]).sum(axis=0)] +
+                    [np.array(footprints_sorted[i_last_slow + 1:]).sum(axis=0)])
             footprints_split = np.clip(np.array(footprints_split), 0, 1)  # type: ignore
             # Recalculate oversampling factor with 2 blocks
             _, _, oversample_factors = sort_parameter_blocks(
@@ -1191,8 +1197,8 @@ class Model(HasLogger):
             # NB: the int() below forces the copy of the factors.
             #     Otherwise the yaml_representer prints references to a single object.
             oversample_factors = (
-                [int(oversample_factors[0])] * (1 + i_last_slow) +
-                [int(oversample_factors[1])] * (len(blocks) - (1 + i_last_slow)))
+                    [int(oversample_factors[0])] * (1 + i_last_slow) +
+                    [int(oversample_factors[1])] * (len(blocks) - (1 + i_last_slow)))
             self.mpi_debug("Doing slow/fast split. The oversampling factors for "
                            "the fast blocks should be interpreted as a global one "
                            "for all of them")

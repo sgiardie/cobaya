@@ -11,6 +11,7 @@ import os
 import sys
 import numpy as np
 from packaging import version
+import re
 
 # Local
 from cobaya.likelihood import Likelihood
@@ -234,7 +235,7 @@ class PlanckClik(Likelihood):
 common_path = "planck"
 
 # To see full clik build output even if installs OK (e.g. to check warnings)
-_clik_verbose = any((s in os.getenv('TRAVIS_COMMIT_MESSAGE', ''))
+_clik_verbose = any((s in os.getenv('COMMIT_MESSAGE', ''))
                     for s in ["clik", "planck"])
 # Don't try again to install clik if it failed for a previous likelihood
 _clik_install_failed = False
@@ -277,12 +278,16 @@ def get_clik_import_path(path, min_version=min_version_clik):
     :class:`tools.VersionCheckError` if the installed version is too old.
     """
     clik_src_path = get_clik_source_folder(path)
-    version_file = os.path.join(clik_src_path, 'svnversion')
+    version_file = os.path.join(clik_src_path, 'readme.md')
     if os.path.exists(version_file):
         with open(version_file, 'r') as f:
-            installed_version = version.parse(f.readline().split("_")[-1].split('-')[0])
+            if version_match := re.search(r'(clik|plc) (\d+\.\d+)', f.read()):
+                installed_version = version_match.group(2)
+            else:
+                installed_version = "16.0"
     else:
-        installed_version = version.parse(clik_src_path.rstrip(os.sep).split("-")[-1])
+        installed_version = clik_src_path.rstrip(os.sep).split("-")[-1]
+    installed_version = version.parse(installed_version)
     if installed_version < version.parse(min_version):
         raise VersionCheckError(
             f"Installed version of the Planck likelihood code 'clik' ({installed_version})"
